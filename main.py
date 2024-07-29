@@ -111,6 +111,16 @@ async def process_command(client, message):
         else:
             options['task'] = "Processing"
 
+        # Check for the -n flag to set new filename
+        if '-n' in command_text:
+            n_index = command_text.index('-n')
+            if n_index + 1 < len(command_text):
+                options['new_filename'] = command_text[n_index + 1]
+            else:
+                options['new_filename'] = None
+        else:
+            options['new_filename'] = None
+
         # Generate a unique task ID
         task_id = f"{message.chat.id}_{message.id}"
 
@@ -147,6 +157,9 @@ async def process_command(client, message):
             progress=upload_progress,
             progress_args=(message, start_time, progress_message, options['task'], task_id)
         )
+
+        # Delete the progress message after upload
+        await progress_message.delete()
 
         # Clean up the downloaded and processed files
         os.remove(video_path)
