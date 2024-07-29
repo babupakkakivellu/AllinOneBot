@@ -1,5 +1,14 @@
+import os
+
 # Configuration for the Telegram bot and FFmpeg
+
 
 API_ID = '27476108'  # Replace with your actual API ID
 API_HASH = 'ed25a3c999b0849364a83b11bea390a0'  # Replace with your actual API hash
 BOT_TOKEN = '7244115020:AAE-agqz28x9OcyoIzbpHznaB2hLlmk1ihQ'  # Replace with your actual Bot Token
+
+# Video directory to store downloaded and processed videos
+VIDEO_DIR = 'videos'
+
+# Ensure the video directory exists
+os.makedirs(VIDEO_DIR, exist_ok=True)
