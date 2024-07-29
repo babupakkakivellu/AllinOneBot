@@ -4,7 +4,7 @@ import os
 import time
 import asyncio
 from pyrogram import Client, filters
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 import subprocess
 from config import API_ID, API_HASH, BOT_TOKEN, DOWNLOAD_DIR
 from utils import parse_command, construct_ffmpeg_command, ensure_directory
@@ -77,23 +77,34 @@ async def ffmpeg_progress(video_path, output_path, options, progress_message: Me
     if task_id in tasks:
         del tasks[task_id]
 
-def parse_duration(line):
-    """Parse total duration from FFmpeg output."""
-    import re
-    match = re.search(r"Duration: (\d+):(\d+):(\d+).(\d+)", line)
-    if match:
-        hours, minutes, seconds, _ = match.groups()
-        return int(hours) * 3600 + int(minutes) * 60 + int(seconds)
-    return None
+    # Ask user for caption
+    caption_message = await progress_message.reply("Please send the caption for the output file.")
 
-def parse_time(line):
-    """Parse current time from FFmpeg output."""
-    import re
-    match = re.search(r"time=(\d+):(\d+):(\d+).(\d+)", line)
-    if match:
-        hours, minutes, seconds, _ = match.groups()
-        return int(hours) * 3600 + int(minutes) * 60 + int(seconds)
-    return 0
+    # Define a function to handle the caption reply
+    @app.on_message(filters.text & filters.reply_to_message(caption_message))
+    async def handle_caption_reply(client, message: Message):
+        caption = message.text
+        await progress_message.delete()
+
+        # Determine if a thumbnail was provided
+        thumbnail_file_id = options.get('thumbnail_file_id')
+
+        # Send the processed file with the caption and optional thumbnail
+        if output_path.lower().endswith(('.mp4', '.avi', '.mkv')):
+            if thumbnail_file_id:
+                await message.reply_video(output_path, caption=caption, thumb=thumbnail_file_id)
+            else:
+                await message.reply_video(output_path, caption=caption)
+        else:
+            if thumbnail_file_id:
+                await message.reply_document(output_path, caption=caption, thumb=thumbnail_file_id)
+            else:
+                await message.reply_document(output_path, caption=caption)
+
+        # Clean up the downloaded and processed files
+        os.remove(video_path)
+        if os.path.exists(output_path):
+            os.remove(output_path)
 
 @app.on_message(filters.command("r"))
 async def process_command(client, message):
@@ -105,21 +116,25 @@ async def process_command(client, message):
 
         # Determine the task name based on flags
         if '-m' in command_text:
-            options['task'] = "Audio Removal"
-        elif '-i' in command_text:
+            options['task'] = "Metadata Change"
+        elif '-a' in command_text:
             options['task'] = "Audio Track Change"
         else:
             options['task'] = "Processing"
 
-        # Check for the -n flag to set new filename
-        if '-n' in command_text:
-            n_index = command_text.index('-n')
-            if n_index + 1 < len(command_text):
-                options['new_filename'] = command_text[n_index + 1]
-            else:
-                options['new_filename'] = None
-        else:
-            options['new_filename'] = None
+        # Handle renaming
+        if '-rn' in command_text:
+            rn_index = command_text.index('-rn')
+            if rn_index + 1 < len(command_text):
+                new_filename = command_text[rn_index + 1]
+                message.reply_to_message.file_name = new_filename
+
+        # Handle thumbnail
+        if '-tn' in command_text:
+            tn_index = command_text.index('-tn')
+            if tn_index + 1 < len(command_text):
+                thumbnail_file_id = command_text[tn_index + 1]
+                options['thumbnail_file_id'] = thumbnail_file_id
 
         # Generate a unique task ID
         task_id = f"{message.chat.id}_{message.id}"
@@ -143,7 +158,7 @@ async def process_command(client, message):
         # Define the output path
         if not options["new_filename"]:
             # If no new filename is provided, create a default one
-            original_filename = file_type.file_name if file_type else "processed_file"
+            original_filename = message.reply_to_message.file_name if message.reply_to_message else "processed_file"
             options["new_filename"] = f"processed_{original_filename}"
         
         output_path = os.path.join(DOWNLOAD_DIR, options["new_filename"])
@@ -151,36 +166,14 @@ async def process_command(client, message):
         # Run FFmpeg command with progress
         await ffmpeg_progress(video_path, output_path, options, progress_message, task_id)
 
-        # Determine if the file is a video or document and send the processed file
-        if file_type and file_type.file_id and file_type.file_name.lower().endswith(('.mp4', '.avi', '.mov')):
-            await message.reply_video(
-                video=output_path,
-                progress=upload_progress,
-                progress_args=(message, start_time, progress_message, options['task'], task_id)
-            )
-        else:
-            await message.reply_document(
-                document=output_path,
-                progress=upload_progress,
-                progress_args=(message, start_time, progress_message, options['task'], task_id)
-            )
-
-        # Delete the progress message after upload
-        await progress_message.delete()
-
-        # Clean up the downloaded and processed files
-        os.remove(video_path)
-        if os.path.exists(output_path):
-            os.remove(output_path)
-
-@app.on_callback_query(filters.regex(r"cancel_"))
-async def cancel_task(client, callback_query):
-    """Cancel the ongoing task."""
-    task_id = callback_query.data.split("_")[1]
+@app.on_callback_query()
+async def handle_callback_query(client, callback_query):
+    """Handle cancel button callback."""
+    task_id = callback_query.data.split('_')[1]
     if task_id in tasks:
         tasks[task_id].terminate()
         del tasks[task_id]
         await callback_query.message.edit("Task canceled.")
 
-if __name__ == "__main__":
-    app.run()
+# Run the bot
+app.run()
