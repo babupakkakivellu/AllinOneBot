@@ -1,5 +1,5 @@
 # Configuration for the Telegram bot and FFmpeg
 
-API_ID = 'your_api_id'  # Replace with your actual API ID
-API_HASH = 'your_api_hash'  # Replace with your actual API hash
-BOT_TOKEN = 'your_bot_token'  # Replace with your actual Bot Token
+API_ID = '27476108'  # Replace with your actual API ID
+API_HASH = 'ed25a3c999b0849364a83b11bea390a0'  # Replace with your actual API hash
+BOT_TOKEN = '7244115020:AAE-agqz28x9OcyoIzbpHznaB2hLlmk1ihQ'  # Replace with your actual Bot Token
