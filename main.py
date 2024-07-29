@@ -1,13 +1,17 @@
-# main.py
-
 import os
 import time
 import asyncio
 from pyrogram import Client, filters
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 import subprocess
 from config import API_ID, API_HASH, BOT_TOKEN, DOWNLOAD_DIR
-from utils import parse_command, construct_ffmpeg_command, ensure_directory
+from utils import (
+    parse_command, 
+    construct_ffmpeg_command, 
+    ensure_directory, 
+    parse_duration,    # Ensure these are imported from utils if they are in utils.py
+    parse_time
+)
 
 # Initialize the bot
 app = Client("ffmpeg_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
