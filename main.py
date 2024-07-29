@@ -35,7 +35,7 @@ async def upload_progress(current, total, message: Message, start_time):
         await send_progress_message(message, f"Uploading: {progress:.2f}% completed")
         start_time = time.time()
 
-def ffmpeg_progress(video_path, output_path, options, message: Message):
+async def ffmpeg_progress(video_path, output_path, options, message: Message):
     """Run FFmpeg with progress output and send updates."""
     command = construct_ffmpeg_command(video_path, output_path, options)
     process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -89,12 +89,11 @@ async def process_command(client, message):
 
         # Download the original video
         start_time = time.time()
-        with tqdm(total=message.reply_to_message.video.file_size, unit='B', unit_scale=True, desc="Downloading") as progress_bar:
-            video_path = await message.reply_to_message.download(
-                file_name=DOWNLOAD_DIR,
-                progress=download_progress,
-                progress_args=(message, start_time)
-            )
+        video_path = await message.reply_to_message.download(
+            file_name=DOWNLOAD_DIR,
+            progress=download_progress,
+            progress_args=(message, start_time)
+        )
 
         # Define the output path
         if not options["new_filename"]:
@@ -109,12 +108,11 @@ async def process_command(client, message):
 
         # Send the processed video back to the user
         start_time = time.time()
-        with tqdm(total=os.path.getsize(output_path), unit='B', unit_scale=True, desc="Uploading") as progress_bar:
-            await message.reply_video(
-                video=output_path,
-                progress=upload_progress,
-                progress_args=(message, start_time)
-            )
+        await message.reply_video(
+            video=output_path,
+            progress=upload_progress,
+            progress_args=(message, start_time)
+        )
 
         # Clean up the downloaded and processed files
         os.remove(video_path)
