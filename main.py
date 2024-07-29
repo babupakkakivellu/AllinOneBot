@@ -62,7 +62,7 @@ async def ffmpeg_progress(video_path, output_path, options, progress_message: Me
                 progress = (current_time / total_duration) * 100
                 elapsed_time = time.time() - start_time
                 if elapsed_time > 2:
-                    await update_progress_message(progress_message, f"Processing {options['task']}: {progress:.2f}% completed", task_id)
+                    await update_progress_message(progress_message, f"{options['task']}: {progress:.2f}% completed", task_id)
                     start_time = time.time()
 
         # Check if the task is canceled
@@ -97,8 +97,8 @@ def parse_time(line):
 
 @app.on_message(filters.command("r"))
 async def process_command(client, message):
-    """Process the command to transform a video."""
-    if message.reply_to_message and message.reply_to_message.video:
+    """Process the command to transform a video or document."""
+    if message.reply_to_message:
         # Parse the command
         command_text = message.text.split()
         options = parse_command(command_text)
@@ -125,14 +125,15 @@ async def process_command(client, message):
         task_id = f"{message.chat.id}_{message.id}"
 
         # Send initial message with cancel button
-        progress_message = await message.reply("Starting video processing...",
+        progress_message = await message.reply("Starting processing...",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("Cancel Task", callback_data=f"cancel_{task_id}")]]
             )
         )
 
-        # Download the original video
+        # Download the original file
         start_time = time.time()
+        file_type = message.reply_to_message.video if message.reply_to_message.video else message.reply_to_message.document
         video_path = await message.reply_to_message.download(
             file_name=DOWNLOAD_DIR,
             progress=download_progress,
@@ -142,7 +143,7 @@ async def process_command(client, message):
         # Define the output path
         if not options["new_filename"]:
             # If no new filename is provided, create a default one
-            original_filename = message.reply_to_message.video.file_name
+            original_filename = file_type.file_name if file_type else "processed_file"
             options["new_filename"] = f"processed_{original_filename}"
         
         output_path = os.path.join(DOWNLOAD_DIR, options["new_filename"])
@@ -150,13 +151,19 @@ async def process_command(client, message):
         # Run FFmpeg command with progress
         await ffmpeg_progress(video_path, output_path, options, progress_message, task_id)
 
-        # Send the processed video back to the user
-        start_time = time.time()
-        await message.reply_video(
-            video=output_path,
-            progress=upload_progress,
-            progress_args=(message, start_time, progress_message, options['task'], task_id)
-        )
+        # Determine if the file is a video or document and send the processed file
+        if file_type and file_type.file_id and file_type.file_name.lower().endswith(('.mp4', '.avi', '.mov')):
+            await message.reply_video(
+                video=output_path,
+                progress=upload_progress,
+                progress_args=(message, start_time, progress_message, options['task'], task_id)
+            )
+        else:
+            await message.reply_document(
+                document=output_path,
+                progress=upload_progress,
+                progress_args=(message, start_time, progress_message, options['task'], task_id)
+            )
 
         # Delete the progress message after upload
         await progress_message.delete()
@@ -166,22 +173,14 @@ async def process_command(client, message):
         if os.path.exists(output_path):
             os.remove(output_path)
 
-        # Remove task from dictionary once completed
-        if task_id in tasks:
-            del tasks[task_id]
-    else:
-        await message.reply("Please reply to a video with your command.")
-
-@app.on_callback_query(filters.regex(r"^cancel_"))
+@app.on_callback_query(filters.regex(r"cancel_"))
 async def cancel_task(client, callback_query):
-    """Handle task cancellation."""
-    task_id = callback_query.data.split("_", 1)[1]
+    """Cancel the ongoing task."""
+    task_id = callback_query.data.split("_")[1]
     if task_id in tasks:
-        tasks[task_id].terminate()  # Terminate the FFmpeg process
-        del tasks[task_id]  # Remove the task from the dictionary
-        await callback_query.message.edit("Task canceled by user.")
-    else:
-        await callback_query.answer("No active task to cancel.", show_alert=True)
+        tasks[task_id].terminate()
+        del tasks[task_id]
+        await callback_query.message.edit("Task canceled.")
 
-# Start the bot
-app.run()
+if __name__ == "__main__":
+    app.run()
