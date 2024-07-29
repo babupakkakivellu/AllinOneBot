@@ -4,8 +4,7 @@ from config import API_ID, API_HASH, BOT_TOKEN
 from utils import (
     change_metadata, change_audio_track, merge_mkv_files,
     extract_audio, convert_video_format, split_video,
-    compress_video, resize_video, add_subtitles, add_watermark,
-    extract_progress_from_line
+    compress_video, resize_video, add_subtitles, add_watermark
 )
 import os
 
@@ -14,6 +13,7 @@ app = Client("my_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 user_files = {}
 user_subtitles = {}
 user_watermarks = {}
+merge_requests = {}  # To keep track of users in merging process
 
 def build_start_keyboard():
     return InlineKeyboardMarkup([
@@ -46,7 +46,8 @@ def handle_callback_query(client, callback_query):
     elif data == "change_audio":
         client.send_message(user_id, "Send the audio track index to keep (or type 'remove' to remove all audio) and the output filename using `-n output_filename.mkv`.")
     elif data == "merge_files":
-        client.send_message(user_id, "Upload the files you want to merge, and then send the output filename using `-n output_filename.mkv`.")
+        client.send_message(user_id, "Upload the files you want to merge. After uploading all files, click the button to start merging.")
+        merge_requests[user_id] = []  # Initialize file list for merging
     elif data == "extract_audio":
         client.send_message(user_id, "Send the output filename using `-n output_filename.mp3`.")
     elif data == "convert_format":
@@ -62,6 +63,18 @@ def handle_callback_query(client, callback_query):
     elif data == "add_watermark":
         client.send_message(user_id, "Upload the watermark image first, then send the video file, and specify the position and output filename using `-n output_filename.mkv`.")
 
+    # Handle merge confirmation
+    elif data == "confirm_merge":
+        if user_id in merge_requests and merge_requests[user_id]:
+            input_files = merge_requests[user_id]
+            message.reply("Enter the output filename using `-n output_filename.mkv`.")
+        else:
+            message.reply("No files to merge. Please upload files first.")
+    elif data == "cancel_merge":
+        if user_id in merge_requests:
+            del merge_requests[user_id]
+        message.reply("Merge operation canceled. You can start again by uploading files.")
+
 @app.on_message(filters.video)
 def handle_video(client, message):
     user_id = message.from_user.id
@@ -70,11 +83,18 @@ def handle_video(client, message):
     # Download the video file
     video = message.download(file_path)
 
-    if user_id not in user_files:
-        user_files[user_id] = []
-    user_files[user_id].append(video)
-
-    message.reply("Video file uploaded successfully!")
+    if user_id in merge_requests:
+        merge_requests[user_id].append(video)
+        message.reply("Video file uploaded successfully! Send more files or click the button below to start merging.",
+                      reply_markup=InlineKeyboardMarkup([
+                          [InlineKeyboardButton("✅ Confirm Merge", callback_data="confirm_merge")],
+                          [InlineKeyboardButton("❌ Cancel", callback_data="cancel_merge")]
+                      ]))
+    else:
+        if user_id not in user_files:
+            user_files[user_id] = []
+        user_files[user_id].append(video)
+        message.reply("Video file uploaded successfully!")
 
 @app.on_message(filters.document.mime_type("text/plain"))
 def handle_document(client, message):
@@ -97,18 +117,6 @@ def handle_photo(client, message):
 
     user_watermarks[user_id] = photo
     message.reply("Watermark image uploaded successfully!")
-
-def send_progress_update(chat_id, message_id, progress):
-    """Send progress update to the user."""
-    progress_text = f"Processing: {progress:.2f}%"
-    app.edit_message_text(chat_id, message_id, progress_text)
-
-def process_task_with_progress(task_func, chat_id, message_id, *args, **kwargs):
-    """Wrap task function to handle progress updates."""
-    def progress_callback(progress):
-        send_progress_update(chat_id, message_id, progress)
-    
-    return task_func(*args, progress_callback=progress_callback, **kwargs)
 
 @app.on_message(filters.text & filters.reply)
 def process_text_commands(client, message):
@@ -182,4 +190,3 @@ def status(client, message):
 
 if __name__ == "__main__":
     app.run()
-  
