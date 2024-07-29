@@ -15,6 +15,7 @@ app = Client("video_processor_bot", api_id=API_ID, api_hash=API_HASH, bot_token=
 user_data = {}
 processing_actions = {}
 progress_messages = {}
+previous_messages = {}
 
 def get_progress_bar(current, total):
     percent = int((current / total) * 100)
@@ -71,13 +72,21 @@ def handle_video(client, message):
             f"ETA: {eta_str}"
         )
         # Edit the existing progress message
-        client.edit_message_text(user_id, progress_message.message_id, progress_msg)
+        if 'message_id' in progress_message:
+            client.edit_message_text(user_id, progress_message.message_id, progress_msg)
 
     start_time = time.time()
     message.download(file_path, progress=progress)
 
     # Notify user after download completion
     user_data[user_id] = {'file': file_path}
+
+    # Delete previous messages (progress and buttons)
+    if user_id in previous_messages:
+        for msg_id in previous_messages[user_id]:
+            client.delete_messages(user_id, msg_id)
+        del previous_messages[user_id]
+
     client.send_message(
         user_id,
         "File downloaded successfully! Choose an action from the menu.",
@@ -86,7 +95,9 @@ def handle_video(client, message):
             [InlineKeyboardButton("Help", callback_data="help")]
         ])
     )
-    del progress_messages[user_id]
+    
+    # Store message IDs to delete later
+    previous_messages[user_id] = [progress_message.message_id]
 
 @app.on_message(filters.document)
 def handle_document(client, message):
@@ -112,7 +123,8 @@ def handle_document(client, message):
                     f"ETA: {eta_str}"
                 )
                 # Edit the existing progress message
-                client.edit_message_text(user_id, progress_message.message_id, progress_msg)
+                if 'message_id' in progress_message:
+                    client.edit_message_text(user_id, progress_message.message_id, progress_msg)
 
             start_time = time.time()
             downloaded_file_path = message.download(progress=progress)
@@ -141,8 +153,15 @@ def handle_document(client, message):
                 user_data[user_id]['files'].append(downloaded_file_path)
                 client.send_message(user_id, "File added to merge list. Send more files if needed, or send the output filename with `-n filename.mkv` to start merging.")
             
+            # Delete previous messages (progress and buttons)
+            if user_id in previous_messages:
+                for msg_id in previous_messages[user_id]:
+                    client.delete_messages(user_id, msg_id)
+                del previous_messages[user_id]
+
             client.send_document(user_id, output_file)
             client.send_message(user_id, response)
+
             del processing_actions[user_id]
         
         except Exception as e:
@@ -199,14 +218,13 @@ def show_processing_menu(client, user_id):
             [InlineKeyboardButton("Resize Video", callback_data="resize_video")],
             [InlineKeyboardButton("Add Subtitles", callback_data="add_subtitles")],
             [InlineKeyboardButton("Add Watermark", callback_data="add_watermark")],
-            [InlineKeyboardButton("Help", callback_data="help")]
         ])
     )
 
 def prompt_for_action(client, user_id, action):
     prompts = {
-        "change_metadata": "Send the metadata in `key=value` format. Example: `title=New Title`.",
-        "change_audio": "Send the audio track file to replace the existing one.",
+        "change_metadata": "Send the metadata you want to change (e.g., Title, Artist).",
+        "change_audio": "Upload the audio track you want to add.",
         "merge_files": "Upload additional files for merging. Once done, send the output filename with `-n filename.mkv`.",
         "extract_audio": "Send the desired output audio file name (e.g., `output.mp3`).",
         "convert_format": "Send the desired output format (e.g., `mp4`).",
@@ -217,53 +235,6 @@ def prompt_for_action(client, user_id, action):
         "add_watermark": "Send the watermark file to add."
     }
     client.send_message(user_id, prompts[action])
-
-def handle_text_action(client, user_id, action, text):
-    try:
-        if action == "change_metadata":
-            output_file = user_data[user_id]['file']
-            success = change_metadata(output_file, output_file, text)
-            response = "Metadata changed successfully!" if success else "Failed to change metadata."
-        
-        elif action == "extract_audio":
-            output_file = text
-            video_file = user_data[user_id]['file']
-            success = extract_audio(video_file, output_file)
-            response = "Audio extracted successfully!" if success else "Failed to extract audio."
-        
-        elif action == "convert_format":
-            output_format = text
-            video_file = user_data[user_id]['file']
-            output_file = f"converted_{int(time.time())}.{output_format}"
-            success = convert_video_format(video_file, output_format, output_file)
-            response = "Format converted successfully!" if success else "Failed to convert format."
-        
-        elif action == "split_video":
-            start_time, duration = text.split()
-            video_file = user_data[user_id]['file']
-            output_file = f"split_{int(time.time())}.mp4"
-            success = split_video(video_file, start_time, duration, output_file)
-            response = "Video split successfully!" if success else "Failed to split video."
-        
-        elif action == "compress_video":
-            bitrate = text
-            video_file = user_data[user_id]['file']
-            output_file = f"compressed_{int(time.time())}.mp4"
-            success = compress_video(video_file, bitrate, output_file)
-            response = "Video compressed successfully!" if success else "Failed to compress video."
-        
-        elif action == "resize_video":
-            width, height = text.split()
-            video_file = user_data[user_id]['file']
-            output_file = f"resized_{int(time.time())}.mp4"
-            success = resize_video(video_file, width, height, output_file)
-            response = "Video resized successfully!" if success else "Failed to resize video."
-        
-        client.send_document(user_id, output_file)
-        client.send_message(user_id, response)
-
-    except Exception as e:
-        client.send_message(user_id, f"An error occurred: {str(e)}")
 
 if __name__ == "__main__":
     app.run()
