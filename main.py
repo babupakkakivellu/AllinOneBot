@@ -33,13 +33,22 @@ def handle_video(client, message):
     if not os.path.exists('downloads'):
         os.makedirs('downloads')
 
+    # Notify user of download start
+    client.send_message(user_id, "Starting file download...")
+    
     try:
-        message.download(file_path)
+        # Download file with progress callback
+        def progress(current, total):
+            percent = int((current / total) * 100)
+            client.send_message(user_id, f"Downloading: {percent}% completed")
+        
+        message.download(file_path, progress=progress)
         user_data[user_id] = {'file': file_path}
 
+        # Notify user after download completion
         client.send_message(
             user_id,
-            "Video uploaded! Select an action from the menu.",
+            "File downloaded successfully! Choose an action from the menu.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("Process Video", callback_data="process_video")],
                 [InlineKeyboardButton("Help", callback_data="help")]
@@ -47,6 +56,51 @@ def handle_video(client, message):
         )
     except Exception as e:
         client.send_message(user_id, f"Error: {str(e)}")
+
+@app.on_message(filters.document)
+def handle_document(client, message):
+    user_id = message.from_user.id
+
+    if user_id in processing_actions:
+        action = processing_actions[user_id]
+        try:
+            def progress(current, total):
+                percent = int((current / total) * 100)
+                client.send_message(user_id, f"Downloading: {percent}% completed")
+
+            # Download the file with progress callback
+            downloaded_file_path = message.download(progress=progress)
+
+            if action == "change_audio":
+                video_file = user_data[user_id]['file']
+                output_file = f"changed_audio_{int(time.time())}.mp4"
+                success = change_audio_track(video_file, downloaded_file_path, output_file)
+                response = "Audio track changed successfully!" if success else "Failed to change audio track."
+            
+            elif action == "add_subtitles":
+                video_file = user_data[user_id]['file']
+                output_file = f"subtitled_{int(time.time())}.mp4"
+                success = add_subtitles(video_file, downloaded_file_path, output_file)
+                response = "Subtitles added successfully!" if success else "Failed to add subtitles."
+            
+            elif action == "add_watermark":
+                video_file = user_data[user_id]['file']
+                output_file = f"watermarked_{int(time.time())}.mp4"
+                success = add_watermark(video_file, downloaded_file_path, output_file)
+                response = "Watermark added successfully!" if success else "Failed to add watermark."
+            
+            elif action == "merge_files":
+                if 'files' not in user_data[user_id]:
+                    user_data[user_id]['files'] = []
+                user_data[user_id]['files'].append(downloaded_file_path)
+                client.send_message(user_id, "File added to merge list. Send more files if needed, or send the output filename with `-n filename.mkv` to start merging.")
+            
+            client.send_document(user_id, output_file)
+            client.send_message(user_id, response)
+            del processing_actions[user_id]
+        
+        except Exception as e:
+            client.send_message(user_id, f"An error occurred: {str(e)}")
 
 @app.on_callback_query()
 def callback_handler(client, query: CallbackQuery):
@@ -83,22 +137,6 @@ def callback_handler(client, query: CallbackQuery):
                     "add_subtitles", "add_watermark"]:
         processing_actions[user_id] = action
         prompt_for_action(client, user_id, action)
-
-@app.on_message(filters.text)
-def handle_text(client, message):
-    user_id = message.from_user.id
-
-    if user_id in processing_actions:
-        action = processing_actions[user_id]
-        handle_text_action(client, user_id, action, message.text)
-
-@app.on_message(filters.document)
-def handle_document(client, message):
-    user_id = message.from_user.id
-
-    if user_id in processing_actions:
-        action = processing_actions[user_id]
-        handle_document_action(client, user_id, action, message)
 
 def show_processing_menu(client, user_id):
     client.send_message(
@@ -181,40 +219,6 @@ def handle_text_action(client, user_id, action, text):
     except Exception as e:
         client.send_message(user_id, f"An error occurred: {str(e)}")
 
-def handle_document_action(client, user_id, action, message):
-    try:
-        if action == "change_audio":
-            audio_file = message.download()
-            video_file = user_data[user_id]['file']
-            output_file = f"changed_audio_{int(time.time())}.mp4"
-            success = change_audio_track(video_file, audio_file, output_file)
-            response = "Audio track changed successfully!" if success else "Failed to change audio track."
-        
-        elif action == "add_subtitles":
-            subtitles_file = message.download()
-            video_file = user_data[user_id]['file']
-            output_file = f"subtitled_{int(time.time())}.mp4"
-            success = add_subtitles(video_file, subtitles_file, output_file)
-            response = "Subtitles added successfully!" if success else "Failed to add subtitles."
-        
-        elif action == "add_watermark":
-            watermark_file = message.download()
-            video_file = user_data[user_id]['file']
-            output_file = f"watermarked_{int(time.time())}.mp4"
-            success = add_watermark(video_file, watermark_file, output_file)
-            response = "Watermark added successfully!" if success else "Failed to add watermark."
-        
-        elif action == "merge_files":
-            if 'files' not in user_data[user_id]:
-                user_data[user_id]['files'] = []
-            user_data[user_id]['files'].append(message.download())
-            client.send_message(user_id, "File added to merge list. Send more files if needed, or send the output filename with `-n filename.mkv` to start merging.")
-
-        client.send_document(user_id, output_file)
-        client.send_message(user_id, response)
-        
-    except Exception as e:
-        client.send_message(user_id, f"An error occurred: {str(e)}")
-
 if __name__ == "__main__":
     app.run()
+    
