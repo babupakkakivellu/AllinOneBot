@@ -1,103 +1,51 @@
-import os
-import time
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
-from config import API_ID, API_HASH, BOT_TOKEN
-from utils import process_file
+from pyrogram.types import Message
+from utils import download_video, merge_videos, upload_video
+from config import API_ID, API_HASH, BOT_TOKEN, VIDEO_DIR
 
-app = Client("video_processor_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+# Create the Pyrogram Client
+app = Client("video_merger_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-user_data = {}
+# Start command handler
+@app.on_message(filters.command("start") & filters.private)
+async def start(client, message: Message):
+    await message.reply_text("Send me video files and I'll merge them for you!")
 
-@app.on_message(filters.command("start"))
-def start(app, message):
-    app.send_message(
-        message.chat.id,
-        "Welcome! Please upload a file to start processing.",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Help", callback_data="help")]
-        ])
-    )
+# Function to handle incoming video messages
+@app.on_message(filters.video & filters.private)
+async def handle_video(client, message: Message):
+    # Download video
+    video_file = await download_video(client, message.video.file_id)
+    
+    await message.reply_text("Video received! Send more or type /merge to start merging.")
+    
+    # Save file path for merging
+    if "videos" not in client.storage:
+        client.storage["videos"] = []
+    client.storage["videos"].append(video_file)
 
-@app.on_message(filters.video | filters.document)
-def handle_file(app, message):
-    user_id = message.from_user.id
-    file_id = message.video.file_id if message.video else message.document.file_id
-    file_path = f"downloads/{file_id}"
+# Merge command handler
+@app.on_message(filters.command("merge") & filters.private)
+async def merge_handler(client, message: Message):
+    video_paths = client.storage.get("videos", [])
+    if len(video_paths) < 2:
+        await message.reply_text("Please send at least two videos to merge.")
+        return
 
-    if not os.path.exists('downloads'):
-        os.makedirs('downloads')
+    output_path = os.path.join(VIDEO_DIR, "merged_video.mkv")
 
-    progress_message = app.send_message(user_id, "⚡ Downloading...")
+    # Merge videos using utility function
+    merge_videos(video_paths, output_path)
 
-    def progress(current, total):
-        percent = int((current / total) * 100)
-        bar_length = 10
-        filled_length = int(bar_length * current // total)
-        bar = '█' * filled_length + '▒' * (bar_length - filled_length)
+    # Send merged video with progress
+    await upload_video(client, message.chat.id, output_path)
 
-        speed = current / (time.time() - start_time) if current > 0 else 0
-        eta = (total - current) / speed if speed > 0 else 0
-
-        eta_minutes, eta_seconds = divmod(eta, 60)
-
-        progress_msg = (
-            f"⚡ ⚡ Downloading... ɪɴ ᴘʀᴏɢʀᴇss\n\n"
-            f"🕛 ᴛɪᴍᴇ ʟᴇғᴛ: {int(eta_minutes)}m, {int(eta_seconds)}s\n\n"
-            f"♻️ᴘʀᴏɢʀᴇss: {percent}%\n"
-            f"[{bar}]"
-        )
-        try:
-            app.edit_message_text(user_id, progress_message.message_id, progress_msg)
-        except Exception as e:
-            print(f"Failed to update progress message: {e}")
-
-    start_time = time.time()
-    message.download(file_path, progress=progress)
-    user_data[user_id] = {'file': file_path}
-    app.send_message(
-        user_id,
-        "File downloaded! Choose an action.",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Process File", callback_data="process_file")],
-            [InlineKeyboardButton("Help", callback_data="help")]
-        ])
-    )
-
-@app.on_callback_query()
-def callback_handler(app, query: CallbackQuery):
-    user_id = query.from_user.id
-    action = query.data
-
-    if action == "help":
-        app.send_message(
-            user_id,
-            "Upload a file and then choose an action to process it.",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Back to Menu", callback_data="process_file")]
-            ])
-        )
-    elif action == "process_file":
-        if user_id in user_data and 'file' in user_data[user_id]:
-            show_processing_menu(app, user_id)
-        else:
-            app.send_message(user_id, "Please upload a file first.")
-
-def show_processing_menu(app, user_id):
-    app.send_message(
-        user_id,
-        "Choose an action:",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Change Metadata", callback_data="change_metadata")],
-            [InlineKeyboardButton("Add Subtitles", callback_data="add_subtitles")],
-            [InlineKeyboardButton("Add Watermark", callback_data="add_watermark")],
-            [InlineKeyboardButton("Extract Audio", callback_data="extract_audio")],
-            [InlineKeyboardButton("Convert Format", callback_data="convert_format")],
-            [InlineKeyboardButton("Split Video", callback_data="split_video")],
-            [InlineKeyboardButton("Compress Video", callback_data="compress_video")],
-            [InlineKeyboardButton("Resize Video", callback_data="resize_video")],
-        ])
-    )
+    # Cleanup
+    for p in video_paths:
+        os.remove(p)
+    os.remove(output_path)
+    client.storage["videos"] = []
 
 if __name__ == "__main__":
+    app.storage = {}
     app.run()
