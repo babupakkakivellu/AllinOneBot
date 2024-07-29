@@ -13,6 +13,7 @@ app = Client("video_processor_bot", api_id=API_ID, api_hash=API_HASH, bot_token=
 
 user_data = {}
 processing_actions = {}
+download_progress = {}
 
 @app.on_message(filters.command("start"))
 def start(client, message):
@@ -35,13 +36,23 @@ def handle_video(client, message):
 
     # Notify user of download start
     client.send_message(user_id, "Starting file download...")
-    
+
     try:
         # Download file with progress callback
         def progress(current, total):
+            if user_id not in download_progress:
+                download_progress[user_id] = {'last_update': time.time(), 'last_percent': 0}
+
+            current_time = time.time()
+            last_update = download_progress[user_id]['last_update']
+            last_percent = download_progress[user_id]['last_percent']
             percent = int((current / total) * 100)
-            client.send_message(user_id, f"Downloading: {percent}% completed")
-        
+
+            if current_time - last_update >= 2 or percent != last_percent:
+                download_progress[user_id]['last_update'] = current_time
+                download_progress[user_id]['last_percent'] = percent
+                client.send_message(user_id, f"Downloading: {percent}% completed")
+
         message.download(file_path, progress=progress)
         user_data[user_id] = {'file': file_path}
 
@@ -65,8 +76,18 @@ def handle_document(client, message):
         action = processing_actions[user_id]
         try:
             def progress(current, total):
+                if user_id not in download_progress:
+                    download_progress[user_id] = {'last_update': time.time(), 'last_percent': 0}
+
+                current_time = time.time()
+                last_update = download_progress[user_id]['last_update']
+                last_percent = download_progress[user_id]['last_percent']
                 percent = int((current / total) * 100)
-                client.send_message(user_id, f"Downloading: {percent}% completed")
+
+                if current_time - last_update >= 2 or percent != last_percent:
+                    download_progress[user_id]['last_update'] = current_time
+                    download_progress[user_id]['last_percent'] = percent
+                    client.send_message(user_id, f"Downloading: {percent}% completed")
 
             # Download the file with progress callback
             downloaded_file_path = message.download(progress=progress)
@@ -221,4 +242,3 @@ def handle_text_action(client, user_id, action, text):
 
 if __name__ == "__main__":
     app.run()
-    
