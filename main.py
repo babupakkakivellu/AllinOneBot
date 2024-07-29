@@ -39,16 +39,18 @@ def handle_callback_query(client, callback_query):
     data = callback_query.data
 
     if data == "upload_video":
-        client.send_message(user_id, "Upload the video file you want to process. After uploading, choose an action from the menu.")
-        user_files[user_id] = []  # Initialize file list for operations
+        client.send_message(user_id, "Upload the video file you want to process. Once uploaded, choose an action from the menu.")
 
     elif data == "merge_files":
-        client.send_message(user_id, "Upload the video files you want to merge. After uploading all files, click 'Confirm Merge' to start merging.")
-        merge_requests[user_id] = []  # Initialize file list for merging
+        client.send_message(user_id, "Upload the video files you want to merge. Click 'Confirm Merge' when you're done.",
+                            reply_markup=InlineKeyboardMarkup([
+                                [InlineKeyboardButton("✅ Confirm Merge", callback_data="confirm_merge")],
+                                [InlineKeyboardButton("❌ Cancel", callback_data="cancel_merge")]
+                            ]))
 
     elif data == "confirm_merge":
         if user_id in merge_requests and merge_requests[user_id]:
-            client.send_message(user_id, "Please provide the output filename with the `-n output_filename.mkv` format.")
+            client.send_message(user_id, "Please provide the output filename with `-n output_filename.mkv`.")
         else:
             client.send_message(user_id, "No files to merge. Please upload files first.")
 
@@ -67,7 +69,7 @@ def handle_video(client, message):
 
     if user_id in merge_requests:
         merge_requests[user_id].append(video)
-        message.reply("Video file uploaded successfully! You can upload more files or click 'Confirm Merge' to start merging.",
+        message.reply("Video file uploaded successfully! Upload more files or click 'Confirm Merge'.",
                       reply_markup=InlineKeyboardMarkup([
                           [InlineKeyboardButton("✅ Confirm Merge", callback_data="confirm_merge")],
                           [InlineKeyboardButton("❌ Cancel", callback_data="cancel_merge")]
@@ -99,16 +101,15 @@ def process_text_commands(client, message):
         else:
             client.send_message(user_id, "Failed to merge files. Please try again.")
         
-        del merge_requests[user_id]  # Clear the merge request after processing
+        del merge_requests[user_id]
 
-    # Handle other commands similarly...
     if user_id in user_files:
         if 'compress' in message.text:
             output_file = parse_filename_argument(message.text)
             if not output_file:
                 output_file = f"compressed_{int(time.time())}.mp4"
             
-            bitrate = '1M'  # Example bitrate
+            bitrate = '1M'
             progress_message = client.send_message(user_id, "Compressing video. Please wait...")
             
             def progress_callback(progress):
@@ -121,7 +122,7 @@ def process_text_commands(client, message):
             else:
                 client.send_message(user_id, "Failed to compress the video. Please try again.")
             
-            del user_files[user_id]  # Clear the files after processing
+            del user_files[user_id]
 
 def parse_filename_argument(text):
     parts = text.split(' -n ')
