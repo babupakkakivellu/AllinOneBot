@@ -37,8 +37,8 @@ def format_eta(current, total, speed):
     return f"{minutes}m, {seconds}s"
 
 @app.on_message(filters.command("start"))
-def start(client, message):
-    client.send_message(
+def start(app, message):
+    app.send_message(
         message.chat.id,
         "Welcome to the Video Processing Bot! Please upload a video file to get started.",
         reply_markup=InlineKeyboardMarkup([
@@ -47,7 +47,7 @@ def start(client, message):
     )
 
 @app.on_message(filters.video)
-def handle_video(client, message):
+def handle_video(app, message):
     user_id = message.from_user.id
     file_id = message.video.file_id
     file_path = f"downloads/{file_id}.mp4"
@@ -56,7 +56,7 @@ def handle_video(client, message):
         os.makedirs('downloads')
 
     # Notify user of download start
-    progress_message = client.send_message(user_id, "⚡ Downloading...")
+    progress_message = app.send_message(user_id, "⚡ Downloading...")
 
     def progress(current, total):
         elapsed = time.time() - start_time
@@ -73,7 +73,7 @@ def handle_video(client, message):
         )
         # Edit the existing progress message
         if 'message_id' in progress_message:
-            client.edit_message_text(user_id, progress_message.message_id, progress_msg)
+            app.edit_message_text(user_id, progress_message.message_id, progress_msg)
 
     start_time = time.time()
     message.download(file_path, progress=progress)
@@ -84,10 +84,10 @@ def handle_video(client, message):
     # Delete previous messages (progress and buttons)
     if user_id in previous_messages:
         for msg_id in previous_messages[user_id]:
-            client.delete_messages(user_id, msg_id)
+            app.delete_messages(user_id, msg_id)
         del previous_messages[user_id]
 
-    client.send_message(
+    app.send_message(
         user_id,
         "File downloaded successfully! Choose an action from the menu.",
         reply_markup=InlineKeyboardMarkup([
@@ -100,14 +100,14 @@ def handle_video(client, message):
     previous_messages[user_id] = [progress_message.message_id]
 
 @app.on_message(filters.document)
-def handle_document(client, message):
+def handle_document(app, message):
     user_id = message.from_user.id
 
     if user_id in processing_actions:
         action = processing_actions[user_id]
         try:
             # Notify user of file download start
-            progress_message = client.send_message(user_id, "⚡ Downloading...")
+            progress_message = app.send_message(user_id, "⚡ Downloading...")
 
             def progress(current, total):
                 elapsed = time.time() - start_time
@@ -124,7 +124,7 @@ def handle_document(client, message):
                 )
                 # Edit the existing progress message
                 if 'message_id' in progress_message:
-                    client.edit_message_text(user_id, progress_message.message_id, progress_msg)
+                    app.edit_message_text(user_id, progress_message.message_id, progress_msg)
 
             start_time = time.time()
             downloaded_file_path = message.download(progress=progress)
@@ -151,29 +151,29 @@ def handle_document(client, message):
                 if 'files' not in user_data[user_id]:
                     user_data[user_id]['files'] = []
                 user_data[user_id]['files'].append(downloaded_file_path)
-                client.send_message(user_id, "File added to merge list. Send more files if needed, or send the output filename with `-n filename.mkv` to start merging.")
+                app.send_message(user_id, "File added to merge list. Send more files if needed, or send the output filename with `-n filename.mkv` to start merging.")
             
             # Delete previous messages (progress and buttons)
             if user_id in previous_messages:
                 for msg_id in previous_messages[user_id]:
-                    client.delete_messages(user_id, msg_id)
+                    app.delete_messages(user_id, msg_id)
                 del previous_messages[user_id]
 
-            client.send_document(user_id, output_file)
-            client.send_message(user_id, response)
+            app.send_document(user_id, output_file)
+            app.send_message(user_id, response)
 
             del processing_actions[user_id]
         
         except Exception as e:
-            client.send_message(user_id, f"An error occurred: {str(e)}")
+            app.send_message(user_id, f"An error occurred: {str(e)}")
 
 @app.on_callback_query()
-def callback_handler(client, query: CallbackQuery):
+def callback_handler(app, query: CallbackQuery):
     user_id = query.from_user.id
     action = query.data
 
     if action == "help":
-        client.send_message(
+        app.send_message(
             user_id,
             "Here are the available commands:\n"
             "- Upload a video file.\n"
@@ -194,17 +194,17 @@ def callback_handler(client, query: CallbackQuery):
         )
     elif action == "process_video":
         if user_id in user_data and 'file' in user_data[user_id]:
-            show_processing_menu(client, user_id)
+            show_processing_menu(app, user_id)
         else:
-            client.send_message(user_id, "Please upload a video file first.")
+            app.send_message(user_id, "Please upload a video file first.")
     elif action in ["change_metadata", "change_audio", "merge_files", "extract_audio",
                     "convert_format", "split_video", "compress_video", "resize_video",
                     "add_subtitles", "add_watermark"]:
         processing_actions[user_id] = action
-        prompt_for_action(client, user_id, action)
+        prompt_for_action(app, user_id, action)
 
-def show_processing_menu(client, user_id):
-    client.send_message(
+def show_processing_menu(app, user_id):
+    app.send_message(
         user_id,
         "Choose an action:",
         reply_markup=InlineKeyboardMarkup([
@@ -221,7 +221,7 @@ def show_processing_menu(client, user_id):
         ])
     )
 
-def prompt_for_action(client, user_id, action):
+def prompt_for_action(app, user_id, action):
     prompts = {
         "change_metadata": "Send the metadata you want to change (e.g., Title, Artist).",
         "change_audio": "Upload the audio track you want to add.",
@@ -234,7 +234,7 @@ def prompt_for_action(client, user_id, action):
         "add_subtitles": "Send the subtitles file to add.",
         "add_watermark": "Send the watermark file to add."
     }
-    client.send_message(user_id, prompts[action])
+    app.send_message(user_id, prompts[action])
 
 if __name__ == "__main__":
     app.run()
