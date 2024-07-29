@@ -3,92 +3,81 @@
 import os
 import subprocess
 import re
-from config import DOWNLOAD_DIR
+from typing import Dict
 
 def ensure_directory(directory: str):
-    """Ensure the directory exists."""
+    """Ensure the directory exists, create it if not."""
     if not os.path.exists(directory):
         os.makedirs(directory)
 
-def parse_command(command_text):
-    """Parse command flags from the input text."""
+def parse_command(command_text: list) -> Dict[str, str]:
+    """Parse the command flags and options."""
     options = {
-        'task': 'Processing',  # Default task name
+        'metadata': None,
+        'audio': None,
         'new_filename': None,
-        'audio_swap': None
+        'thumbnail_file_id': None,
+        'task': 'Processing'
     }
-    
-    # Map flags to options
+
+    # Parsing logic
     if '-m' in command_text:
-        options['task'] = "Audio Removal"
-    elif '-i' in command_text:
-        options['task'] = "Audio Track Change"
-        if '-a' in command_text:
-            a_index = command_text.index('-a')
-            if a_index + 1 < len(command_text):
-                options['audio_swap'] = command_text[a_index + 1]
-    
-    # Check for new filename
+        m_index = command_text.index('-m')
+        if m_index + 1 < len(command_text):
+            options['metadata'] = command_text[m_index + 1]
+
+    if '-a' in command_text:
+        a_index = command_text.index('-a')
+        if a_index + 1 < len(command_text):
+            options['audio'] = command_text[a_index + 1]
+
     if '-n' in command_text:
         n_index = command_text.index('-n')
         if n_index + 1 < len(command_text):
             options['new_filename'] = command_text[n_index + 1]
-        else:
-            options['new_filename'] = None
-    
+
+    if '-tn' in command_text:
+        tn_index = command_text.index('-tn')
+        if tn_index + 1 < len(command_text):
+            options['thumbnail_file_id'] = command_text[tn_index + 1]
+
     return options
 
-def construct_ffmpeg_command(input_file, output_file, options):
-    """Construct FFmpeg command based on the given options."""
-    command = ["ffmpeg", "-i", input_file]
-    
-    if options['task'] == "Audio Removal":
-        command.extend(["-an"])
-    
-    elif options['task'] == "Audio Track Change" and options['audio_swap']:
-        audio_map = parse_audio_swap(options['audio_swap'])
-        command.extend(audio_map)
-    
-    command.extend(["-c:v", "copy", "-c:a", "copy"])
-    
-    if options['new_filename']:
-        command.append(output_file)
-    else:
-        command.append(output_file)
-    
-    return command
+def construct_ffmpeg_command(input_file: str, output_file: str, options: Dict[str, str]) -> str:
+    """Construct the FFmpeg command based on the options provided."""
+    cmd = ['ffmpeg', '-i', input_file]
 
-def parse_audio_swap(swap_string):
-    """Generate FFmpeg map options for swapping audio tracks."""
-    # Parse the swap string (e.g., '3-1-2')
-    tracks = swap_string.split('-')
-    audio_map = []
+    # Metadata change
+    if options['metadata']:
+        cmd.append(f'-metadata:s:v={options["metadata"]}')  # First video stream
+        cmd.append(f'-metadata:s:a={options["metadata"]}')  # First audio stream
+        cmd.append(f'-metadata:s:s={options["metadata"]}')  # First subtitle stream
 
-    # Generate FFmpeg map commands for each track swap
-    for index, track in enumerate(tracks):
-        audio_map.extend(["-map", f"0:a:{int(track) - 1}"])
-    
-    return audio_map
+    # Audio track change
+    if options['audio']:
+        audio_tracks = options['audio'].split('-')
+        for idx, track in enumerate(audio_tracks):
+            cmd.append(f'-map 0:a:{track} -metadata:s:a:{idx}="Audio Track {idx + 1}"')
 
-def parse_duration(line):
-    """Parse total duration from FFmpeg output."""
-    match = re.search(r"Duration: (\d+):(\d+):(\d+).(\d+)", line)
+    # Output file
+    cmd.extend([output_file])
+
+    return ' '.join(cmd)
+
+def parse_duration(line: str) -> float:
+    """Parse the duration from FFmpeg output."""
+    match = re.search(r'Duration: (\d+:\d+:\d+.\d+)', line)
     if match:
-        hours, minutes, seconds, _ = match.groups()
-        return int(hours) * 3600 + int(minutes) * 60 + int(seconds)
-    return None
-
-def parse_time(line):
-    """Parse current time from FFmpeg output."""
-    match = re.search(r"time=(\d+):(\d+):(\d+).(\d+)", line)
-    if match:
-        hours, minutes, seconds, _ = match.groups()
-        return int(hours) * 3600 + int(minutes) * 60 + int(seconds)
+        h, m, s = match.group(1).split(':')
+        s, ms = s.split('.')
+        return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 100
     return 0
 
-async def send_progress_message(message, text, task_id):
-    """Send or update a progress message with a cancel button."""
-    cancel_button = InlineKeyboardMarkup(
-        [[InlineKeyboardButton("Cancel Task", callback_data=f"cancel_{task_id}")]]
-    )
-    await message.edit(text, reply_markup=cancel_button)
+def parse_time(line: str) -> float:
+    """Parse the current time from FFmpeg output."""
+    match = re.search(r'time=(\d+:\d+:\d+.\d+)', line)
+    if match:
+        h, m, s = match.group(1).split(':')
+        s, ms = s.split('.')
+        return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 100
+    return 0
