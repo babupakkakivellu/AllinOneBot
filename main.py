@@ -72,8 +72,7 @@ def handle_video(app, message):
             f"ETA: {eta_str}"
         )
         # Edit the existing progress message
-        if 'message_id' in progress_message:
-            app.edit_message_text(user_id, progress_message.message_id, progress_msg)
+        app.edit_message_text(user_id, progress_message.message_id, progress_msg)
 
     start_time = time.time()
     message.download(file_path, progress=progress)
@@ -96,7 +95,7 @@ def handle_video(app, message):
         ])
     )
     
-    # Store message IDs to delete later
+    # Store message ID to delete later
     previous_messages[user_id] = [progress_message.message_id]
 
 @app.on_message(filters.document)
@@ -123,8 +122,7 @@ def handle_document(app, message):
                     f"ETA: {eta_str}"
                 )
                 # Edit the existing progress message
-                if 'message_id' in progress_message:
-                    app.edit_message_text(user_id, progress_message.message_id, progress_msg)
+                app.edit_message_text(user_id, progress_message.message_id, progress_msg)
 
             start_time = time.time()
             downloaded_file_path = message.download(progress=progress)
