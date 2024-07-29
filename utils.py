@@ -1,130 +1,109 @@
-import subprocess
+import ffmpeg
 import os
-import re
+import time
 
-def run_ffmpeg_command(command, progress_callback=None):
-    """Run an FFmpeg command and report progress."""
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    
-    total_duration = 1  # Default to 1 to avoid division by zero
-    for line in process.stderr:
-        if progress_callback:
-            # Example for extracting time information, adjust based on actual output
-            match = re.search(r'time=(\d+):(\d+):(\d+)\.(\d+)', line)
-            if match:
-                hours, minutes, seconds, milliseconds = map(int, match.groups())
-                current_time = hours * 3600 + minutes * 60 + seconds + milliseconds / 100
-                progress = (current_time / total_duration) * 100
-                progress_callback(int(progress))
-    
-    process.wait()
-    return process.returncode == 0
+def change_metadata(input_file, metadata, output_file):
+    try:
+        ffmpeg.input(input_file).output(output_file, **metadata).run()
+        return True, "Metadata changed successfully!"
+    except Exception as e:
+        print(f"Failed to change metadata: {e}")
+        return False, f"Error: {e}"
 
-def merge_mkv_files(input_files, output_file, progress_callback=None):
-    """Merge multiple MKV files into one using FFmpeg and report progress."""
-    # Create a file list for FFmpeg concat demuxer
-    list_file = 'files.txt'
-    with open(list_file, 'w') as f:
-        for file in input_files:
-            f.write(f"file '{file}'\n")
-    
-    # Use FFmpeg concat demuxer to merge files
-    command = ['ffmpeg', '-f', 'concat', '-safe', '0', '-i', list_file, '-c', 'copy', output_file]
-    
-    def progress_callback_wrapper(progress):
-        if progress_callback:
-            progress_callback(progress)
-    
-    result = run_ffmpeg_command(command, progress_callback_wrapper)
-    os.remove(list_file)
-    return result
+def add_subtitles(input_file, subtitles_file, output_file):
+    try:
+        ffmpeg.input(input_file).output(output_file, vf=f"subtitles={subtitles_file}").run()
+        return True, "Subtitles added successfully!"
+    except Exception as e:
+        print(f"Failed to add subtitles: {e}")
+        return False, f"Error: {e}"
 
-def compress_video(input_file, bitrate, output_file, progress_callback=None):
-    """Compress a video file and report progress."""
-    command = ['ffmpeg', '-i', input_file, '-b:v', bitrate, output_file]
-    
-    def progress_callback_wrapper(progress):
-        if progress_callback:
-            progress_callback(progress)
-    
-    return run_ffmpeg_command(command, progress_callback_wrapper)
+def add_watermark(input_file, watermark_file, output_file):
+    try:
+        ffmpeg.input(input_file).output(output_file, vf=f"movie={watermark_file} [watermark]; [in][watermark] overlay=W-w-10:H-h-10 [out]").run()
+        return True, "Watermark added successfully!"
+    except Exception as e:
+        print(f"Failed to add watermark: {e}")
+        return False, f"Error: {e}"
 
-def change_metadata(input_file, output_file, metadata, progress_callback=None):
-    """Change metadata of a video file using FFmpeg."""
-    command = ['ffmpeg', '-i', input_file, '-metadata', metadata, output_file]
-    
-    def progress_callback_wrapper(progress):
-        if progress_callback:
-            progress_callback(progress)
-    
-    return run_ffmpeg_command(command, progress_callback_wrapper)
+def extract_audio(input_file, output_audio_file):
+    try:
+        ffmpeg.input(input_file).output(output_audio_file).run()
+        return True, "Audio extracted successfully!"
+    except Exception as e:
+        print(f"Failed to extract audio: {e}")
+        return False, f"Error: {e}"
 
-def change_audio_track(input_file, audio_file, output_file, progress_callback=None):
-    """Change the audio track of a video file using FFmpeg."""
-    command = ['ffmpeg', '-i', input_file, '-i', audio_file, '-c', 'copy', '-map', '0:v:0', '-map', '1:a:0', output_file]
-    
-    def progress_callback_wrapper(progress):
-        if progress_callback:
-            progress_callback(progress)
-    
-    return run_ffmpeg_command(command, progress_callback_wrapper)
+def convert_video_format(input_file, output_file, format):
+    try:
+        ffmpeg.input(input_file).output(output_file, vcodec=format).run()
+        return True, f"Video converted to {format} format!"
+    except Exception as e:
+        print(f"Failed to convert video format: {e}")
+        return False, f"Error: {e}"
 
-def extract_audio(input_file, output_file, progress_callback=None):
-    """Extract audio from a video file using FFmpeg."""
-    command = ['ffmpeg', '-i', input_file, '-q:a', '0', '-map', 'a', output_file]
-    
-    def progress_callback_wrapper(progress):
-        if progress_callback:
-            progress_callback(progress)
-    
-    return run_ffmpeg_command(command, progress_callback_wrapper)
+def split_video(input_file, start_time, duration, output_file):
+    try:
+        ffmpeg.input(input_file, ss=start_time, t=duration).output(output_file).run()
+        return True, "Video split successfully!"
+    except Exception as e:
+        print(f"Failed to split video: {e}")
+        return False, f"Error: {e}"
 
-def convert_video_format(input_file, output_format, output_file, progress_callback=None):
-    """Convert a video file to a different format using FFmpeg."""
-    command = ['ffmpeg', '-i', input_file, output_file]
-    
-    def progress_callback_wrapper(progress):
-        if progress_callback:
-            progress_callback(progress)
-    
-    return run_ffmpeg_command(command, progress_callback_wrapper)
+def compress_video(input_file, bitrate, output_file):
+    try:
+        ffmpeg.input(input_file).output(output_file, video_bitrate=bitrate).run()
+        return True, "Video compressed successfully!"
+    except Exception as e:
+        print(f"Failed to compress video: {e}")
+        return False, f"Error: {e}"
 
-def split_video(input_file, start_time, duration, output_file, progress_callback=None):
-    """Split a video file using FFmpeg."""
-    command = ['ffmpeg', '-i', input_file, '-ss', start_time, '-t', duration, output_file]
-    
-    def progress_callback_wrapper(progress):
-        if progress_callback:
-            progress_callback(progress)
-    
-    return run_ffmpeg_command(command, progress_callback_wrapper)
+def resize_video(input_file, width, height, output_file):
+    try:
+        ffmpeg.input(input_file).output(output_file, vf=f"scale={width}:{height}").run()
+        return True, "Video resized successfully!"
+    except Exception as e:
+        print(f"Failed to resize video: {e}")
+        return False, f"Error: {e}"
 
-def resize_video(input_file, width, height, output_file, progress_callback=None):
-    """Resize a video file using FFmpeg."""
-    command = ['ffmpeg', '-i', input_file, '-vf', f'scale={width}:{height}', output_file]
-    
-    def progress_callback_wrapper(progress):
-        if progress_callback:
-            progress_callback(progress)
-    
-    return run_ffmpeg_command(command, progress_callback_wrapper)
+def progress_bar(current, total, action):
+    percent = int((current / total) * 100)
+    bar_length = 20
+    filled_length = int(bar_length * current // total)
+    bar = '■' * filled_length + '▤' * (bar_length - filled_length)
+    processed_mb = current / (1024**2)
+    total_mb = total / (1024**2)
+    status = "Processing" if action == "process" else "Downloading"
+    return (
+        f"┃ {bar} {percent:.2f}%\n"
+        f"┠ Processed: {processed_mb:.2f}MB of {total_mb:.2f}MB\n"
+        f"┠ Status: {status} | ETA: TBD\n"
+        f"┠ Speed: TBD | Elapsed: TBD\n"
+        f"┠ Engine: qBit v4.5.5\n"
+        f"┠ Mode: #Leech | #qBit\n"
+        f"┠ User: █【﻿ＹＡＡＲ】█ | ID: TBD\n"
+        f"┖ /cancel_{int(time.time())}"
+    )
 
-def add_subtitles(input_file, subtitles_file, output_file, progress_callback=None):
-    """Add subtitles to a video file using FFmpeg."""
-    command = ['ffmpeg', '-i', input_file, '-vf', f'subtitles={subtitles_file}', output_file]
+def process_file(file_path, action, **kwargs):
+    output_file = f"processed_{int(time.time())}.mp4"
+    success = False
+    message = "Unknown action."
     
-    def progress_callback_wrapper(progress):
-        if progress_callback:
-            progress_callback(progress)
+    if action == "change_metadata":
+        metadata = kwargs.get('metadata', {})
+        success, message = change_metadata(file_path, metadata, output_file)
     
-    return run_ffmpeg_command(command, progress_callback_wrapper)
-
-def add_watermark(input_file, watermark_file, output_file, progress_callback=None):
-    """Add a watermark to a video file using FFmpeg."""
-    command = ['ffmpeg', '-i', input_file, '-i', watermark_file, '-filter_complex', 'overlay=10:10', output_file]
+    elif action == "add_subtitles":
+        subtitles_file = kwargs.get('subtitles_file')
+        success, message = add_subtitles(file_path, subtitles_file, output_file)
     
-    def progress_callback_wrapper(progress):
-        if progress_callback:
-            progress_callback(progress)
+    elif action == "add_watermark":
+        watermark_file = kwargs.get('watermark_file')
+        success, message = add_watermark(file_path, watermark_file, output_file)
     
-    return run_ffmpeg_command(command, progress_callback_wrapper)
+    elif action == "extract_audio":
+        output_audio_file = kwargs.get('output_audio_file')
+        success, message = extract_audio(file_path, output_audio_file)
+    
+    elif action ==
