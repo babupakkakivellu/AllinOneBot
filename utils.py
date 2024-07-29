@@ -1,83 +1,60 @@
-# utils.py
-
+from pyrogram import Client
+from mutagen import File
+from pydub import AudioSegment
 import os
-import subprocess
-import re
-from typing import Dict
+from pyrogram.types import Message
 
-def ensure_directory(directory: str):
-    """Ensure the directory exists, create it if not."""
-    if not os.path.exists(directory):
-        os.makedirs(directory)
+def progress(current, total, message: Message):
+    progress_percentage = current * 100 // total
+    message.edit_text(f"Processing: {progress_percentage}%")
 
-def parse_command(command_text: list) -> Dict[str, str]:
-    """Parse the command flags and options."""
-    options = {
-        'metadata': None,
-        'audio': None,
-        'new_filename': None,
-        'thumbnail_file_id': None,
-        'task': 'Processing'
-    }
+def modify_file(client: Client, message: Message, thumbnail=None):
+    file_id = message.document or message.video
+    file = client.download_file(file_id, progress=lambda current, total: progress(current, total, message))
+    file_name = file.name
 
-    # Parsing logic
-    if '-m' in command_text:
-        m_index = command_text.index('-m')
-        if m_index + 1 < len(command_text):
-            options['metadata'] = command_text[m_index + 1]
+    # Check if the file has a command
+    if message.caption and message.caption.startswith('/p'):
+        options = message.caption.split(' ')[1:]
+        metadata = None
+        audio_index = None
+        new_name = None
 
-    if '-a' in command_text:
-        a_index = command_text.index('-a')
-        if a_index + 1 < len(command_text):
-            options['audio'] = command_text[a_index + 1]
+        for option in options:
+            if option.startswith('-m'):
+                metadata = option[3:]
+            elif option.startswith('-ai'):
+                audio_index = option[4:]
+            elif option.startswith('-n'):
+                new_name = option[3:]
 
-    if '-n' in command_text:
-        n_index = command_text.index('-n')
-        if n_index + 1 < len(command_text):
-            options['new_filename'] = command_text[n_index + 1]
+        if metadata or audio_index or new_name:
+            if file_name.endswith(('.mp3', '.mp4', '.mkv')):  # Check file extensions
+                if metadata:
+                    # Modify metadata using mutagen
+                    metadata = File(file)
+                    metadata['title'] = metadata
+                    metadata.save()
 
-    if '-tn' in command_text:
-        tn_index = command_text.index('-tn')
-        if tn_index + 1 < len(command_text):
-            options['thumbnail_file_id'] = command_text[tn_index + 1]
+                if audio_index:
+                    # Modify audio index using pydub
+                    audio = AudioSegment.from_file(file)
+                    audio.set_tags(tags={'tracknumber': audio_index})
+                    audio.export(file, format='mp3')
 
-    return options
+                if new_name:
+                    # Rename the file
+                    os.rename(file, new_name)
 
-def construct_ffmpeg_command(input_file: str, output_file: str, options: Dict[str, str]) -> str:
-    """Construct the FFmpeg command based on the options provided."""
-    cmd = ['ffmpeg', '-i', input_file]
-
-    # Metadata change
-    if options['metadata']:
-        cmd.append(f'-metadata:s:v={options["metadata"]}')  # First video stream
-        cmd.append(f'-metadata:s:a={options["metadata"]}')  # First audio stream
-        cmd.append(f'-metadata:s:s={options["metadata"]}')  # First subtitle stream
-
-    # Audio track change
-    if options['audio']:
-        audio_tracks = options['audio'].split('-')
-        for idx, track in enumerate(audio_tracks):
-            cmd.append(f'-map 0:a:{track} -metadata:s:a:{idx}="Audio Track {idx + 1}"')
-
-    # Output file
-    cmd.extend([output_file])
-
-    return ' '.join(cmd)
-
-def parse_duration(line: str) -> float:
-    """Parse the duration from FFmpeg output."""
-    match = re.search(r'Duration: (\d+:\d+:\d+.\d+)', line)
-    if match:
-        h, m, s = match.group(1).split(':')
-        s, ms = s.split('.')
-        return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 100
-    return 0
-
-def parse_time(line: str) -> float:
-    """Parse the current time from FFmpeg output."""
-    match = re.search(r'time=(\d+:\d+:\d+.\d+)', line)
-    if match:
-        h, m, s = match.group(1).split(':')
-        s, ms = s.split('.')
-        return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 100
-    return 0
+                if thumbnail:
+                    # Send the output file with the thumbnail
+                    client.send_document(chat_id=message.chat.id, document=file, thumb=thumbnail)
+                else:
+                    # Send the output file without a thumbnail
+                    client.send_document(chat_id=message.chat.id, document=file)
+            else:
+                message.reply_text('Unsupported file format. Please use mp3, mp4, or mkv files.')
+        else:
+            message.reply_text('No options provided. Please use /p -m <metadata> -ai <audio_index> -n <new_name>')
+    else:
+        message.reply_text('No command provided. Please use /p with options.')
