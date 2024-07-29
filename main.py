@@ -8,12 +8,31 @@ from utils import (
 )
 import os
 import time
+import math
 
 app = Client("video_processor_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 user_data = {}
 processing_actions = {}
-download_progress = {}
+
+def get_progress_bar(current, total):
+    percent = int((current / total) * 100)
+    bar_length = 20
+    filled_length = int(bar_length * current // total)
+    bar = '█' * filled_length + '▒' * (bar_length - filled_length)
+    return f"[{bar}] {percent}%"
+
+def format_speed(current, total, elapsed):
+    speed = current / elapsed if elapsed > 0 else 0
+    size_units = ["B", "KiB", "MiB", "GiB", "TiB"]
+    size_unit = size_units[int(math.log(max(speed, 1), 1024))]
+    return f"{speed / (1024 ** size_units.index(size_unit)):.2f} {size_unit}/s"
+
+def format_eta(current, total, speed):
+    remaining = total - current
+    eta = remaining / speed if speed > 0 else 0
+    minutes, seconds = divmod(int(eta), 60)
+    return f"{minutes}m, {seconds}s"
 
 @app.on_message(filters.command("start"))
 def start(client, message):
@@ -35,28 +54,30 @@ def handle_video(client, message):
         os.makedirs('downloads')
 
     # Notify user of download start
-    client.send_message(user_id, "Starting file download...")
+    client.send_message(user_id, "⚡ Downloading...")
 
     try:
         # Download file with progress callback
+        start_time = time.time()
         def progress(current, total):
-            if user_id not in download_progress:
-                download_progress[user_id] = {'last_update': time.time(), 'last_percent': 0}
-
-            current_time = time.time()
-            last_update = download_progress[user_id]['last_update']
-            last_percent = download_progress[user_id]['last_percent']
-            percent = int((current / total) * 100)
-
-            if current_time - last_update >= 2 or percent != last_percent:
-                download_progress[user_id]['last_update'] = current_time
-                download_progress[user_id]['last_percent'] = percent
-                client.send_message(user_id, f"Downloading: {percent}% completed")
+            elapsed = time.time() - start_time
+            speed = current / elapsed if elapsed > 0 else 0
+            bar = get_progress_bar(current, total)
+            speed_str = format_speed(current, total, elapsed)
+            eta_str = format_eta(current, total, speed)
+            progress_msg = (
+                f"{bar}\n"
+                f"♻️ Processing: {int((current / total) * 100)}%\n"
+                f"{current / (1024**2):.1f} MiB of {total / (1024**2):.2f} MiB\n"
+                f"Speed: {speed_str}\n"
+                f"ETA: {eta_str}"
+            )
+            client.send_message(user_id, progress_msg, disable_notification=True)
 
         message.download(file_path, progress=progress)
-        user_data[user_id] = {'file': file_path}
 
         # Notify user after download completion
+        user_data[user_id] = {'file': file_path}
         client.send_message(
             user_id,
             "File downloaded successfully! Choose an action from the menu.",
@@ -75,21 +96,23 @@ def handle_document(client, message):
     if user_id in processing_actions:
         action = processing_actions[user_id]
         try:
+            # Download the file
+            start_time = time.time()
             def progress(current, total):
-                if user_id not in download_progress:
-                    download_progress[user_id] = {'last_update': time.time(), 'last_percent': 0}
+                elapsed = time.time() - start_time
+                speed = current / elapsed if elapsed > 0 else 0
+                bar = get_progress_bar(current, total)
+                speed_str = format_speed(current, total, elapsed)
+                eta_str = format_eta(current, total, speed)
+                progress_msg = (
+                    f"{bar}\n"
+                    f"♻️ Processing: {int((current / total) * 100)}%\n"
+                    f"{current / (1024**2):.1f} MiB of {total / (1024**2):.2f} MiB\n"
+                    f"Speed: {speed_str}\n"
+                    f"ETA: {eta_str}"
+                )
+                client.send_message(user_id, progress_msg, disable_notification=True)
 
-                current_time = time.time()
-                last_update = download_progress[user_id]['last_update']
-                last_percent = download_progress[user_id]['last_percent']
-                percent = int((current / total) * 100)
-
-                if current_time - last_update >= 2 or percent != last_percent:
-                    download_progress[user_id]['last_update'] = current_time
-                    download_progress[user_id]['last_percent'] = percent
-                    client.send_message(user_id, f"Downloading: {percent}% completed")
-
-            # Download the file with progress callback
             downloaded_file_path = message.download(progress=progress)
 
             if action == "change_audio":
