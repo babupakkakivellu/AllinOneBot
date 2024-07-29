@@ -7,13 +7,12 @@ from utils import (
     compress_video, resize_video, add_subtitles, add_watermark
 )
 import os
+import time
 
 app = Client("my_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 user_files = {}
-user_subtitles = {}
-user_watermarks = {}
-merge_requests = {}  # To keep track of users in merging process
+merge_requests = {}
 
 def build_start_keyboard():
     return InlineKeyboardMarkup([
@@ -40,52 +39,35 @@ def handle_callback_query(client, callback_query):
     data = callback_query.data
 
     if data == "upload_video":
-        client.send_message(user_id, "Please upload the video file you want to process.")
-    elif data == "change_metadata":
-        client.send_message(user_id, "Send the metadata in key:value format and the output filename using `-n output_filename.mkv`.")
-    elif data == "change_audio":
-        client.send_message(user_id, "Send the audio track index to keep (or type 'remove' to remove all audio) and the output filename using `-n output_filename.mkv`.")
-    elif data == "merge_files":
-        client.send_message(user_id, "Upload the files you want to merge. After uploading all files, click the button to start merging.")
-        merge_requests[user_id] = []  # Initialize file list for merging
-    elif data == "extract_audio":
-        client.send_message(user_id, "Send the output filename using `-n output_filename.mp3`.")
-    elif data == "convert_format":
-        client.send_message(user_id, "Send the desired format (e.g., mp4) and output filename using `-n output_filename.format`.")
-    elif data == "split_video":
-        client.send_message(user_id, "Send the start time and duration (e.g., 00:00:10,00:00:30) and output filename using `-n output_filename.mkv`.")
-    elif data == "compress_video":
-        client.send_message(user_id, "Send the desired bitrate (e.g., 1M) and output filename using `-n output_filename.mkv`.")
-    elif data == "resize_video":
-        client.send_message(user_id, "Send the new width and height (e.g., 1280x720) and output filename using `-n output_filename.mkv`.")
-    elif data == "add_subtitles":
-        client.send_message(user_id, "Upload the subtitle file first, then send the video file, and specify the output filename using `-n output_filename.mkv`.")
-    elif data == "add_watermark":
-        client.send_message(user_id, "Upload the watermark image first, then send the video file, and specify the position and output filename using `-n output_filename.mkv`.")
+        client.send_message(user_id, "Upload the video file you want to process. After uploading, choose an action from the menu.")
+        user_files[user_id] = []  # Initialize file list for operations
 
-    # Handle merge confirmation
+    elif data == "merge_files":
+        client.send_message(user_id, "Upload the video files you want to merge. After uploading all files, click 'Confirm Merge' to start merging.")
+        merge_requests[user_id] = []  # Initialize file list for merging
+
     elif data == "confirm_merge":
         if user_id in merge_requests and merge_requests[user_id]:
-            input_files = merge_requests[user_id]
-            message.reply("Enter the output filename using `-n output_filename.mkv`.")
+            client.send_message(user_id, "Please provide the output filename with the `-n output_filename.mkv` format.")
         else:
-            message.reply("No files to merge. Please upload files first.")
+            client.send_message(user_id, "No files to merge. Please upload files first.")
+
     elif data == "cancel_merge":
         if user_id in merge_requests:
             del merge_requests[user_id]
-        message.reply("Merge operation canceled. You can start again by uploading files.")
+        client.send_message(user_id, "Merge operation canceled. You can start again by uploading files.")
+
+    # Handle other callback actions similarly...
 
 @app.on_message(filters.video)
 def handle_video(client, message):
     user_id = message.from_user.id
     file_path = message.video.file_name
-
-    # Download the video file
     video = message.download(file_path)
 
     if user_id in merge_requests:
         merge_requests[user_id].append(video)
-        message.reply("Video file uploaded successfully! Send more files or click the button below to start merging.",
+        message.reply("Video file uploaded successfully! You can upload more files or click 'Confirm Merge' to start merging.",
                       reply_markup=InlineKeyboardMarkup([
                           [InlineKeyboardButton("✅ Confirm Merge", callback_data="confirm_merge")],
                           [InlineKeyboardButton("❌ Cancel", callback_data="cancel_merge")]
@@ -94,99 +76,56 @@ def handle_video(client, message):
         if user_id not in user_files:
             user_files[user_id] = []
         user_files[user_id].append(video)
-        message.reply("Video file uploaded successfully!")
-
-@app.on_message(filters.document.mime_type("text/plain"))
-def handle_document(client, message):
-    user_id = message.from_user.id
-    file_path = message.document.file_name
-
-    # Download the subtitle file
-    subtitle = message.download(file_path)
-
-    user_subtitles[user_id] = subtitle
-    message.reply("Subtitle file uploaded successfully!")
-
-@app.on_message(filters.photo)
-def handle_photo(client, message):
-    user_id = message.from_user.id
-    file_path = f"{message.photo.file_id}.png"
-
-    # Download the watermark photo
-    photo = message.download(file_path)
-
-    user_watermarks[user_id] = photo
-    message.reply("Watermark image uploaded successfully!")
+        message.reply("Video file uploaded successfully! Choose the next action from the menu.")
 
 @app.on_message(filters.text & filters.reply)
 def process_text_commands(client, message):
     user_id = message.from_user.id
-    if user_id not in user_files:
-        message.reply("No file available. Please upload a file first.")
-        return
 
-    input_file = user_files[user_id][-1]
-    text = message.text
-
-    if message.reply_to_message and message.reply_to_message.video:
-        input_file = message.reply_to_message.download()
-
-    # Parse output filename from the text
-    def parse_filename_argument(text):
-        parts = text.split(' -n ')
-        return parts[1].strip() if len(parts) > 1 else None
-
-    # Handle different commands
-    if message.reply_to_message.text.startswith("Change Metadata"):
-        output_file = parse_filename_argument(text)
-        metadata = {k: v for k, v in (item.split(':') for item in text.split(',') if ':' in item)}
+    if user_id in merge_requests:
+        output_file = parse_filename_argument(message.text)
         if not output_file:
-            output_file = f"output_{os.path.basename(input_file)}"
-        progress_message = client.send_message(user_id, "Starting metadata change...")
-        success = process_task_with_progress(lambda: change_metadata(input_file, output_file, metadata), user_id, progress_message.message_id)
+            output_file = f"merged_{int(time.time())}.mkv"
+        
+        progress_message = client.send_message(user_id, "Merging files. Please wait...")
+        
+        def progress_callback(progress):
+            client.edit_message_text(user_id, progress_message.message_id, f"Merging files: {progress}% completed.")
+        
+        success = merge_mkv_files(merge_requests[user_id], output_file, progress_callback)
         if success:
-            client.send_message(user_id, f"Metadata changed successfully! File saved as {output_file}.")
+            client.send_document(user_id, output_file)
+            client.send_message(user_id, f"Merging completed! Your file is available as {output_file}.")
         else:
-            client.send_message(user_id, "Failed to change metadata.")
+            client.send_message(user_id, "Failed to merge files. Please try again.")
+        
+        del merge_requests[user_id]  # Clear the merge request after processing
 
-    elif message.reply_to_message.text.startswith("Change Audio Track"):
-        if "remove" in text.lower():
-            task = lambda: change_audio_track(input_file, output_file, remove_audio=True)
-        else:
-            try:
-                audio_index = int(text.strip().split()[0])
-                task = lambda: change_audio_track(input_file, output_file, audio_index=audio_index)
-            except ValueError:
-                message.reply("Invalid audio index. Please enter a valid index or 'remove'.")
-                return
+    # Handle other commands similarly...
+    if user_id in user_files:
+        if 'compress' in message.text:
+            output_file = parse_filename_argument(message.text)
+            if not output_file:
+                output_file = f"compressed_{int(time.time())}.mp4"
+            
+            bitrate = '1M'  # Example bitrate
+            progress_message = client.send_message(user_id, "Compressing video. Please wait...")
+            
+            def progress_callback(progress):
+                client.edit_message_text(user_id, progress_message.message_id, f"Compressing video: {progress}% completed.")
+            
+            success = compress_video(user_files[user_id][0], bitrate, output_file, progress_callback)
+            if success:
+                client.send_document(user_id, output_file)
+                client.send_message(user_id, f"Compression completed! Your file is available as {output_file}.")
+            else:
+                client.send_message(user_id, "Failed to compress the video. Please try again.")
+            
+            del user_files[user_id]  # Clear the files after processing
 
-        output_file = parse_filename_argument(text)
-        if not output_file:
-            output_file = f"output_{os.path.basename(input_file)}"
-        progress_message = client.send_message(user_id, "Starting audio change...")
-        success = process_task_with_progress(task, user_id, progress_message.message_id)
-        if success:
-            client.send_message(user_id, f"Audio track changed successfully! File saved as {output_file}.")
-        else:
-            client.send_message(user_id, "Failed to change audio track.")
-
-    # Similar updates for other commands...
-
-@app.on_message(filters.command("status"))
-def status(client, message):
-    user_id = message.from_user.id
-    message.reply("Available commands:\n"
-                  "/upload - Upload a video file\n"
-                  "/change_metadata - Change video metadata\n"
-                  "/change_audio - Change or remove audio track\n"
-                  "/merge_files - Merge multiple files\n"
-                  "/extract_audio - Extract audio from a video\n"
-                  "/convert_format - Convert video format\n"
-                  "/split_video - Split a video into segments\n"
-                  "/compress_video - Compress a video file\n"
-                  "/resize_video - Resize a video\n"
-                  "/add_subtitles - Add subtitles to a video\n"
-                  "/add_watermark - Add a watermark to a video")
+def parse_filename_argument(text):
+    parts = text.split(' -n ')
+    return parts[1].strip() if len(parts) > 1 else None
 
 if __name__ == "__main__":
     app.run()
