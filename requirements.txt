@@ -1,4 +1,4 @@
 pyrogram
 pytgcalls
 ffmpeg-python
-
+tgcrypto
