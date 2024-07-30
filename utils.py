@@ -1,84 +1,83 @@
-import subprocess
 import os
+import subprocess
 import asyncio
+from pyrogram import Client, types
+
+DOWNLOAD_DIR = 'downloads'
+
+def ensure_download_dir():
+    if not os.path.exists(DOWNLOAD_DIR):
+        os.makedirs(DOWNLOAD_DIR)
+
+async def download_media_with_progress(client: Client, file_id: str, message: types.Message):
+    ensure_download_dir()
+    
+    file_path = os.path.join(DOWNLOAD_DIR, f"{file_id}.mp4")
+    
+    async with client.download_media(file_id, file_path) as progress:
+        total_size = progress.total
+        downloaded = 0
+        
+        async for chunk in progress:
+            downloaded += len(chunk)
+            progress_percentage = (downloaded / total_size) * 100
+            await message.edit_text(f"Downloading: {progress_percentage:.2f}% completed")
+    
+    return file_path
 
 def merge_videos(video_files, output_file):
-    # Create the ffmpeg command to merge videos
-    file_list = '|'.join(video_files)
-    command = f"ffmpeg -i \"concat:{file_list}\" -c copy \"{output_file}\""
-
-    # Execute the command
+    command = [
+        'ffmpeg', 
+        *[f'-i {file}' for file in video_files], 
+        '-filter_complex', 
+        f'concat=n={len(video_files)}:v=1:a=1 [v] [a]', 
+        '-map', '[v]', 
+        '-map', '[a]', 
+        '-y', 
+        output_file
+    ]
     try:
-        subprocess.run(command, shell=True, check=True)
+        subprocess.run(' '.join(command), shell=True, check=True)
     except subprocess.CalledProcessError as e:
-        print(f"Error during merging videos: {e}")
+        print(f"Error occurred while merging videos: {e}")
         raise
 
 def get_video_metadata(file_path):
-    # Run ffprobe to get video metadata
     command = [
-        "ffprobe", "-v", "error", "-show_entries",
-        "stream=duration,width,height", "-of", "default=noprint_wrappers=1:nokey=1", file_path
+        'ffprobe', 
+        '-v', 'error', 
+        '-select_streams', 'v:0', 
+        '-show_entries', 'stream=width,height,duration', 
+        '-of', 'default=noprint_wrappers=1:nokey=1', 
+        file_path
     ]
+    
+    result = subprocess.run(command, capture_output=True, text=True)
+    metadata = result.stdout.strip().split('\n')
+
+    width = metadata[0] if len(metadata) > 0 else 'N/A'
+    height = metadata[1] if len(metadata) > 1 else 'N/A'
+    duration = metadata[2] if len(metadata) > 2 else 'N/A'
 
     try:
-        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        metadata = result.stdout.strip().split('\n')
+        return int(width), int(height), float(duration)
+    except ValueError as e:
+        print(f"Error parsing video metadata: {e}")
+        return 0, 0, 0
 
-        if len(metadata) >= 3:
-            duration_str, width_str, height_str = metadata[:3]
-        else:
-            # Handle case where metadata might be incomplete
-            duration_str = metadata[0] if len(metadata) > 0 else '0'
-            width_str = metadata[1] if len(metadata) > 1 else '0'
-            height_str = metadata[2] if len(metadata) > 2 else '0'
-
-        duration = float(duration_str) if duration_str and duration_str not in {'N/A', ''} else 0.0
-        width = int(width_str) if width_str and width_str not in {'N/A', ''} else 0
-        height = int(height_str) if height_str and height_str not in {'N/A', ''} else 0
-
-        return width, height, duration
-
-    except Exception as e:
-        print(f"Error getting video metadata: {e}")
-        return 0, 0, 0  # Return default values if an error occurs
-
-async def download_media_with_progress(client, file_id, message):
-    # Download the media file with progress tracking
-    download_path = os.path.join("downloads", file_id + ".mp4")
-
-    # Initialize progress variables
-    progress = 0
-    total_size = None
-    downloaded_size = 0
-
-    async def update_progress():
-        nonlocal progress
-        while progress < 100:
-            await client.edit_message_text(
-                chat_id=message.chat.id,
-                message_id=message.message_id,
-                text=f"Downloading... {progress:.2f}% complete"
-            )
-            await asyncio.sleep(4)  # Update every 4 seconds
-
-    async def download():
-        nonlocal downloaded_size
-        async for chunk in client.download_media(file_id, chunk_size=1024*1024):
-            downloaded_size += len(chunk)
-            if total_size:
-                progress = (downloaded_size / total_size) * 100
-            else:
-                progress = 0
-            await update_progress()
-        await client.edit_message_text(
-            chat_id=message.chat.id,
-            message_id=message.message_id,
-            text=f"Download complete! File saved as {download_path}"
-        )
-
-    # Start the download
-    with open(download_path, 'wb') as f:
-        await download()
-
-    return download_path
+def get_random_thumbnail(video_file):
+    thumbnail_file = video_file.replace('.mp4', '.jpg')
+    command = [
+        'ffmpeg', 
+        '-i', video_file, 
+        '-ss', '00:00:01.000', 
+        '-vframes', '1', 
+        thumbnail_file
+    ]
+    try:
+        subprocess.run(command, check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Error occurred while generating thumbnail: {e}")
+        return None
+    
+    return thumbnail_file
