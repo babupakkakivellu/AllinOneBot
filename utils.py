@@ -9,33 +9,35 @@ def ensure_download_dir():
     if not os.path.exists(DOWNLOAD_DIR):
         os.makedirs(DOWNLOAD_DIR)
 
-async def download_media_with_progress(client: Client, file_id: str, message: types.Message):
+async def download_media_with_progress(client: Client, file_id: str, chat_id: int):
     ensure_download_dir()
     
     file_path = os.path.join(DOWNLOAD_DIR, f"{file_id}.mp4")
     
+    # Send initial message for download progress
+    progress_msg = await client.send_message(chat_id, "Downloading: 0% completed")
+    
     # Download file
-    download = await client.download_media(file_id, file_path)
-    
-    if download:
-        await message.edit_text("Downloading: 0% completed")  # Initial message
-    
-        # Track progress
-        file_size = os.path.getsize(file_path)
-        downloaded_size = 0
+    file_size = 0
+    downloaded_size = 0
 
-        # Report progress
-        while downloaded_size < file_size:
-            downloaded_size = os.path.getsize(file_path)
+    try:
+        async for chunk in client.download_media(file_id, file_path, progress=download_progress):
+            downloaded_size += len(chunk)
             progress_percentage = (downloaded_size / file_size) * 100
-            await message.edit_text(f"Downloading: {progress_percentage:.2f}% completed")
-            await asyncio.sleep(4)  # Update progress every 4 seconds
+            await progress_msg.edit(f"Downloading: {progress_percentage:.2f}% completed")
 
-        await message.edit_text("Download completed")
-    else:
-        await message.edit_text("Download failed")
-    
+    except Exception as e:
+        await progress_msg.edit("Download failed")
+        print(f"Error during download: {e}")
+        return None
+
+    await progress_msg.edit("Download completed")
     return file_path
+
+async def download_progress(downloaded, total):
+    progress_percentage = (downloaded / total) * 100
+    await progress_msg.edit(f"Downloading: {progress_percentage:.2f}% completed")
 
 def merge_videos(video_files, output_file):
     command = [
