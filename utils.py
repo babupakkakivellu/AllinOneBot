@@ -1,5 +1,6 @@
 import subprocess
 import os
+import asyncio
 
 def merge_videos(video_files, output_file):
     # Create the ffmpeg command to merge videos
@@ -42,7 +43,7 @@ def get_video_metadata(file_path):
         print(f"Error getting video metadata: {e}")
         return 0, 0, 0  # Return default values if an error occurs
 
-def download_media_with_progress(client, file_id, message):
+async def download_media_with_progress(client, file_id, message):
     # Download the media file with progress tracking
     download_path = os.path.join("downloads", file_id + ".mp4")
 
@@ -57,7 +58,7 @@ def download_media_with_progress(client, file_id, message):
             await client.edit_message_text(
                 chat_id=message.chat.id,
                 message_id=message.message_id,
-                text=f"Downloading... {progress}% complete"
+                text=f"Downloading... {progress:.2f}% complete"
             )
             await asyncio.sleep(4)  # Update every 4 seconds
 
