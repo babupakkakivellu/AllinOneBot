@@ -1,7 +1,7 @@
 import os
 import subprocess
 import asyncio
-from pyrogram import Client, types
+from pyrogram import Client
 
 DOWNLOAD_DIR = 'downloads'
 
@@ -14,28 +14,41 @@ async def download_media_with_progress(client: Client, file_id: str, chat_id: in
     
     file_path = os.path.join(DOWNLOAD_DIR, f"{file_id}.mp4")
     
+    # Ensure chat_id is an integer
+    if not isinstance(chat_id, int):
+        raise ValueError(f"Invalid chat_id: {chat_id}. Must be an integer.")
+    
     # Send initial message for download progress
     progress_msg = await client.send_message(chat_id, "Downloading: 0% completed")
-    
-    # Download file
-    file_size = 0
-    downloaded_size = 0
 
+    # Initialize download variables
+    file_size = None
+    downloaded_size = 0
+    last_update_time = asyncio.get_event_loop().time()
+
+    # Download file
     try:
         async for chunk in client.download_media(file_id, file_path, progress=download_progress):
             downloaded_size += len(chunk)
-            progress_percentage = (downloaded_size / file_size) * 100
-            await progress_msg.edit(f"Downloading: {progress_percentage:.2f}% completed")
-
+            
+            # Update progress every 4 seconds
+            current_time = asyncio.get_event_loop().time()
+            if current_time - last_update_time >= 4:
+                last_update_time = current_time
+                progress_percentage = (downloaded_size / file_size) * 100 if file_size else 0
+                await progress_msg.edit(f"Downloading: {progress_percentage:.2f}% completed")
+                
     except Exception as e:
         await progress_msg.edit("Download failed")
         print(f"Error during download: {e}")
         return None
 
+    # Finalize progress message
     await progress_msg.edit("Download completed")
     return file_path
 
 async def download_progress(downloaded, total):
+    # This function is invoked periodically to update progress
     progress_percentage = (downloaded / total) * 100
     await progress_msg.edit(f"Downloading: {progress_percentage:.2f}% completed")
 
