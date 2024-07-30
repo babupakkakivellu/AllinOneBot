@@ -1,66 +1,47 @@
 import subprocess
-import os
 import random
+import os
+from PIL import Image
 
-def merge_videos(video_files, output_file, thumbnail_file=None):
-    input_files = '|'.join(video_files)
+def merge_videos(video_files, output_file):
+    input_files = " ".join([f"-i {file}" for file in video_files])
+    filter_complex = f"concat=n={len(video_files)}:v=1:a=1 [v] [a]"
+    command = f"ffmpeg {input_files} -filter_complex \"{filter_complex}\" -map [v] -map [a] -y {output_file}"
+    subprocess.run(command, shell=True, check=True)
+
+def get_video_metadata(file_path):
     command = [
-        'ffmpeg',
-        '-y',  # Overwrite output files without asking
-        '-i', f'concat:{input_files}',
-        '-c', 'copy',
-        output_file
+        "ffprobe",
+        "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=width,height,duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        file_path
     ]
+    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    metadata = result.stdout.decode().strip().split('\n')
     
-    # Run the FFmpeg command to merge videos
-    subprocess.run(command, check=True)
+    # Parse metadata with error handling
+    try:
+        width = float(metadata[0]) if metadata[0] != 'N/A' else None
+        height = float(metadata[1]) if metadata[1] != 'N/A' else None
+        duration = float(metadata[2]) if metadata[2] != 'N/A' else None
+    except IndexError:
+        width, height, duration = None, None, None
 
-    # Generate a random thumbnail if not provided
-    if not thumbnail_file:
-        return generate_thumbnail(output_file)
+    return width, height, duration
 
-def generate_thumbnail(video_file):
-    thumbnail_time = random.uniform(0.1, get_video_duration(video_file) - 0.1)
-    thumbnail_file = f"{os.path.splitext(video_file)[0]}_thumb.jpg"
+def generate_random_thumbnail(file_path, output_thumbnail):
     command = [
-        'ffmpeg',
-        '-y',  # Overwrite output files without asking
-        '-ss', str(thumbnail_time),
-        '-i', video_file,
-        '-vframes', '1',
-        '-q:v', '2',  # Quality setting for thumbnail
-        thumbnail_file
+        "ffmpeg",
+        "-i", file_path,
+        "-ss", "00:00:01.000",  # Capture frame at 1 second
+        "-vframes", "1",
+        output_thumbnail
     ]
+    subprocess.run(command, shell=True, check=True)
 
-    # Run the FFmpeg command to generate a thumbnail
-    subprocess.run(command, check=True)
-
+def get_random_thumbnail(file_path):
+    thumbnail_file = f"thumbnail_{random.randint(1000, 9999)}.jpg"
+    generate_random_thumbnail(file_path, thumbnail_file)
     return thumbnail_file
-
-def get_video_duration(video_file):
-    command = [
-        'ffprobe',
-        '-v', 'error',
-        '-show_entries',
-        'format=duration',
-        '-of',
-        'default=noprint_wrappers=1:nokey=1',
-        video_file
-    ]
-
-    # Get the duration of the video
-    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-    return float(result.stdout)
-
-def get_video_metadata(video_file):
-    command = [
-        'ffprobe',
-        '-v', 'error',
-        '-select_streams', 'v:0',
-        '-show_entries', 'stream=width,height,duration',
-        '-of', 'csv=s=x:p=0',
-        video_file
-    ]
-    result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-    width, height, duration = map(float, result.stdout.decode().strip().split('x'))
-    return duration, width, height
