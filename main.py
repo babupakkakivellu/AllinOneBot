@@ -106,7 +106,7 @@ async def receive_videos(client, message: Message):
     
     # Start download and show progress
     download_msg = await message.reply("Downloading video, please wait...")
-    video_file = await download_media_with_progress(client, message.video.file_id, download_msg)
+    video_file = await download_media_with_progress(client, message, download_msg)
 
     if user_id not in pending_files:
         pending_files[user_id] = {
@@ -134,30 +134,33 @@ async def receive_videos(client, message: Message):
     else:
         await message.reply("Send more files or type /done when finished.")
 
-async def download_media_with_progress(client, file_id, progress_message):
+async def download_media_with_progress(client, message, progress_message):
     """Download media with progress updates."""
     file_path = None
+    file_id = message.video.file_id
+    total_size = message.video.file_size
+    progress = 0
     try:
-        async for chunk in client.iter_download(file_id, chunk_size=1024*1024):
-            file_path = chunk.path  # Set the path to where the file is being downloaded
-            downloaded = chunk.downloaded
-            total = chunk.total_size
-            progress = downloaded / total * 100 if total else 0
-
-            # Update the progress message every 4 seconds
-            await client.edit_message_text(
-                chat_id=progress_message.chat.id,
-                message_id=progress_message.message_id,
-                text=f"Downloading video: {progress:.2f}% complete"
-            )
-            await asyncio.sleep(4)
+        file_path = await client.download_media(
+            file_id,
+            progress=progress_for_pyrogram,
+            progress_args=(progress_message, total_size)
+        )
     except Exception as e:
         await client.edit_message_text(
             chat_id=progress_message.chat.id,
-            message_id=progress_message.message_id,
+            message_id=progress_message.id,
             text=f"Failed to download video: {str(e)}"
         )
     return file_path
+
+async def progress_for_pyrogram(current, total, progress_message, total_size):
+    """Progress callback for downloads."""
+    progress = current / total_size * 100
+    try:
+        await progress_message.edit(f"Downloading video: {progress:.2f}% complete")
+    except Exception as e:
+        print(f"Error updating message: {str(e)}")
 
 @app.on_message(filters.text & filters.private)
 async def handle_text_messages(client, message: Message):
@@ -185,7 +188,7 @@ async def handle_text_messages(client, message: Message):
             
             # Notify user that processing has started
             progress_msg = await message.reply("Merging videos, please wait...")
-            pending_files[user_id]["progress_message"] = progress_msg.message_id
+            pending_files[user_id]["progress_message"] = progress_msg.id
 
             # Function to handle progress updates
             def update_progress():
@@ -202,16 +205,10 @@ async def handle_text_messages(client, message: Message):
                     )
                     time.sleep(4)  # Update every 4 seconds
 
-            # Merge videos
+            # Merge videos with progress tracking
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, merge_videos, video_files, output_file)
-            
-            # Update progress to 100%
-            await client.edit_message_text(
-                chat_id=message.chat.id,
-                message_id=pending_files[user_id]["progress_message"],
-                text="Merging videos: 100% complete"
-            )
+            update_progress()
 
             # Get video metadata
             duration, width, height = await loop.run_in_executor(None, get_video_metadata, output_file)
@@ -224,7 +221,7 @@ async def handle_text_messages(client, message: Message):
 
             # Upload progress message
             upload_msg = await message.reply("Uploading video, please wait...")
-            pending_files[user_id]["upload_message"] = upload_msg.message_id
+            pending_files[user_id]["upload_message"] = upload_msg.id
 
             # Function to handle upload progress updates
             def update_upload_progress(file_size):
@@ -248,7 +245,6 @@ async def handle_text_messages(client, message: Message):
             
             # Upload video or document based on user setting
             if settings["upload_format"] == "video":
-                thumb = settings["thumbnail"] if settings["thumbnail"] else None
                 await client.send_video(
                     chat_id=message.chat.id,
                     video=output_file,
