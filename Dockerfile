@@ -1,6 +1,10 @@
 FROM python:3.9
 
 RUN apt -qq update && apt -qq install -y git wget ffmpeg
+
+RUN pip install pyrogram
+RUN pip install pytgcalls
+RUN pip install ffmpeg-python
  
 COPY . . 
 
