@@ -1,22 +1,26 @@
-# utils.py
-
-import subprocess
 import os
+import subprocess
 
 def merge_videos(video_files, output_file):
-    """Merges a list of video files into a single output file using ffmpeg."""
-    with open("filelist.txt", "w") as file_list:
-        for video_file in video_files:
-            file_list.write(f"file '{video_file}'\n")
+    """Merge multiple video files into a single output file."""
+    try:
+        # Create a text file with the list of videos to merge
+        with open("videos_to_merge.txt", "w") as f:
+            for video in video_files:
+                f.write(f"file '{video}'\n")
 
-    command = [
-        "ffmpeg",
-        "-f", "concat",
-        "-safe", "0",
-        "-i", "filelist.txt",
-        "-c", "copy",
-        output_file
-    ]
-    subprocess.run(command, check=True)
-
-    os.remove("filelist.txt")
+        # Run FFmpeg command to merge the videos
+        command = [
+            "ffmpeg",
+            "-f", "concat",
+            "-safe", "0",
+            "-i", "videos_to_merge.txt",
+            "-c", "copy",
+            output_file
+        ]
+        subprocess.run(command, check=True)
+        
+    finally:
+        # Clean up the text file
+        if os.path.exists("videos_to_merge.txt"):
+            os.remove("videos_to_merge.txt")
