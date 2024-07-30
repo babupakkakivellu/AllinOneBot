@@ -103,7 +103,10 @@ async def receive_videos(client, message: Message):
     pending_files[user_id]["videos"].append(video_file)
     video_count = len(pending_files[user_id]["videos"])
 
-    await message.reply(f"Received file {video_count}.")
+    if video_count == 1:
+        await message.reply(f"Received {video_count} file.")
+    else:
+        await message.reply(f"Received {video_count} files.")
 
     if pending_files[user_id]["expected_count"] is not None:
         if video_count < pending_files[user_id]["expected_count"]:
