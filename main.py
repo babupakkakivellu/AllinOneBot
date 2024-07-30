@@ -3,7 +3,7 @@ import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from config import api_id, api_hash, bot_token
-from utils import merge_videos
+from utils import merge_videos, get_video_metadata
 
 # Initialize the bot
 app = Client("ffmpeg_bot", api_id=api_id, api_hash=api_hash, bot_token=bot_token)
@@ -137,20 +137,37 @@ async def handle_text_messages(client, message: Message):
 
             video_files = pending_files[user_id]["videos"]
             output_file = filename
-            thumbnail = user_settings[user_id].get("thumbnail")
             
             await message.reply("Merging videos, please wait...")
 
             loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, merge_videos, video_files, output_file)
+            thumbnail = user_settings[user_id].get("thumbnail")
+            if not thumbnail:
+                thumbnail = await loop.run_in_executor(None, merge_videos, video_files, output_file)
+
+            # Get video metadata
+            duration, width, height = await loop.run_in_executor(None, get_video_metadata, output_file)
 
             settings = user_settings.get(user_id, {"upload_format": "video", "caption_font": "default"})
             caption = "Videos merged successfully!"
 
             if settings["upload_format"] == "video":
-                await client.send_video(message.chat.id, video=output_file, caption=caption, thumb=thumbnail)
+                await client.send_video(
+                    message.chat.id,
+                    video=output_file,
+                    caption=caption,
+                    duration=duration,
+                    width=width,
+                    height=height,
+                    thumb=thumbnail,
+                    supports_streaming=True
+                )
             else:
-                await client.send_document(message.chat.id, document=output_file, caption=caption, thumb=thumbnail)
+                await client.send_document(
+                    message.chat.id,
+                    document=output_file,
+                    caption=caption
+                )
 
             for file in video_files:
                 os.remove(file)
