@@ -14,6 +14,11 @@ pending_files = {}
 
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message: Message):
+    user_id = message.from_user.id
+    # Initialize user settings if not present
+    if user_id not in user_settings:
+        user_settings[user_id] = {"upload_format": "video", "caption_font": "default", "thumbnail": None}
+
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("Help", callback_data="help")],
         [InlineKeyboardButton("Merge Videos", callback_data="merge_videos")]
@@ -44,7 +49,11 @@ async def help_command(client, message: Message):
 @app.on_message(filters.command("settings") & filters.private)
 async def settings_command(client, message: Message):
     user_id = message.from_user.id
-    settings = user_settings.get(user_id, {"upload_format": "video", "caption_font": "default", "thumbnail": None})
+    # Initialize user settings if not present
+    if user_id not in user_settings:
+        user_settings[user_id] = {"upload_format": "video", "caption_font": "default", "thumbnail": None}
+
+    settings = user_settings.get(user_id)
     settings_text = (
         f"Current settings:\n"
         f"Upload format: {settings['upload_format']}\n"
@@ -57,9 +66,11 @@ async def settings_command(client, message: Message):
 @app.on_message(filters.command("set_format") & filters.private)
 async def set_format(client, message: Message):
     user_id = message.from_user.id
+    # Initialize user settings if not present
+    if user_id not in user_settings:
+        user_settings[user_id] = {"upload_format": "video", "caption_font": "default", "thumbnail": None}
     try:
         format = message.text.split(maxsplit=1)[1].strip()
-        user_settings[user_id] = user_settings.get(user_id, {"upload_format": "video", "caption_font": "default", "thumbnail": None})
         user_settings[user_id]["upload_format"] = format
         await message.reply(f"Upload format set to {format}.")
     except IndexError:
@@ -68,9 +79,11 @@ async def set_format(client, message: Message):
 @app.on_message(filters.command("set_font") & filters.private)
 async def set_font(client, message: Message):
     user_id = message.from_user.id
+    # Initialize user settings if not present
+    if user_id not in user_settings:
+        user_settings[user_id] = {"upload_format": "video", "caption_font": "default", "thumbnail": None}
     try:
         font = message.text.split(maxsplit=1)[1].strip()
-        user_settings[user_id] = user_settings.get(user_id, {"upload_format": "video", "caption_font": "default", "thumbnail": None})
         user_settings[user_id]["caption_font"] = font
         await message.reply(f"Caption font set to {font}.")
     except IndexError:
@@ -83,8 +96,11 @@ async def set_thumbnail_command(client, message: Message):
 @app.on_message(filters.photo & filters.private)
 async def receive_thumbnail(client, message: Message):
     user_id = message.from_user.id
+    # Initialize user settings if not present
+    if user_id not in user_settings:
+        user_settings[user_id] = {"upload_format": "video", "caption_font": "default", "thumbnail": None}
+
     thumbnail_file = await client.download_media(message.photo.file_id)
-    user_settings[user_id] = user_settings.get(user_id, {"upload_format": "video", "caption_font": "default", "thumbnail": None})
     user_settings[user_id]["thumbnail"] = thumbnail_file
     await message.reply("Thumbnail set successfully.")
 
@@ -104,9 +120,9 @@ async def receive_videos(client, message: Message):
     video_count = len(pending_files[user_id]["videos"])
 
     if video_count == 1:
-        await message.reply(f"Received {video_count} file.")
+        await message.reply(f"1 file received.")
     else:
-        await message.reply(f"Received {video_count} files.")
+        await message.reply(f"{video_count} files received.")
 
     if pending_files[user_id]["expected_count"] is not None:
         if video_count < pending_files[user_id]["expected_count"]:
@@ -120,6 +136,9 @@ async def receive_videos(client, message: Message):
 @app.on_message(filters.text & filters.private)
 async def handle_text_messages(client, message: Message):
     user_id = message.from_user.id
+
+    if user_id not in user_settings:
+        user_settings[user_id] = {"upload_format": "video", "caption_font": "default", "thumbnail": None}
 
     if message.text.strip().lower() == "/done" and user_id in pending_files:
         if pending_files[user_id]["operation"] == "merge_videos":
@@ -148,7 +167,7 @@ async def handle_text_messages(client, message: Message):
             # Get video metadata
             duration, width, height = await loop.run_in_executor(None, get_video_metadata, output_file)
 
-            settings = user_settings.get(user_id, {"upload_format": "video", "caption_font": "default"})
+            settings = user_settings[user_id]
             caption = "Videos merged successfully!"
 
             if settings["upload_format"] == "video":
