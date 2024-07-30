@@ -103,8 +103,11 @@ async def receive_thumbnail(client, message: Message):
 @app.on_message(filters.video & filters.private)
 async def receive_videos(client, message: Message):
     user_id = message.from_user.id
-    video_file = await client.download_media(message.video.file_id)
     
+    # Start download and show progress
+    download_msg = await message.reply("Downloading video, please wait...")
+    video_file = await download_media_with_progress(client, message.video.file_id, download_msg)
+
     if user_id not in pending_files:
         pending_files[user_id] = {
             "operation": "merge_videos",
@@ -130,6 +133,31 @@ async def receive_videos(client, message: Message):
             await message.reply("All files received. Please provide the output filename (e.g., merged_video.mp4):")
     else:
         await message.reply("Send more files or type /done when finished.")
+
+async def download_media_with_progress(client, file_id, progress_message):
+    """Download media with progress updates."""
+    file_path = None
+    try:
+        async for chunk in client.iter_download(file_id, chunk_size=1024*1024):
+            file_path = chunk.path  # Set the path to where the file is being downloaded
+            downloaded = chunk.downloaded
+            total = chunk.total_size
+            progress = downloaded / total * 100 if total else 0
+
+            # Update the progress message every 4 seconds
+            await client.edit_message_text(
+                chat_id=progress_message.chat.id,
+                message_id=progress_message.message_id,
+                text=f"Downloading video: {progress:.2f}% complete"
+            )
+            await asyncio.sleep(4)
+    except Exception as e:
+        await client.edit_message_text(
+            chat_id=progress_message.chat.id,
+            message_id=progress_message.message_id,
+            text=f"Failed to download video: {str(e)}"
+        )
+    return file_path
 
 @app.on_message(filters.text & filters.private)
 async def handle_text_messages(client, message: Message):
@@ -182,25 +210,28 @@ async def handle_text_messages(client, message: Message):
             await client.edit_message_text(
                 chat_id=message.chat.id,
                 message_id=pending_files[user_id]["progress_message"],
-                text="Merging videos: 100% complete. Processing video..."
+                text="Merging videos: 100% complete"
             )
 
             # Get video metadata
             duration, width, height = await loop.run_in_executor(None, get_video_metadata, output_file)
+            thumb = user_settings[user_id].get("thumbnail")
+            if not thumb:
+                thumb = get_random_thumbnail(output_file)
 
-            settings = user_settings[user_id]
+            settings = user_settings.get(user_id)
             caption = "Videos merged successfully!"
 
-            # Notify user that upload has started
+            # Upload progress message
             upload_msg = await message.reply("Uploading video, please wait...")
             pending_files[user_id]["upload_message"] = upload_msg.message_id
 
             # Function to handle upload progress updates
             def update_upload_progress(file_size):
-                chunk_size = 1024 * 1024  # 1 MB
-                total_chunks = file_size // chunk_size + (file_size % chunk_size > 0)
-                for i in range(total_chunks):
-                    progress = (i + 1) / total_chunks * 100
+                uploaded = 0
+                while uploaded < file_size:
+                    uploaded += file_size * 0.1  # Simulate upload progress
+                    progress = uploaded / file_size * 100
                     asyncio.run_coroutine_threadsafe(
                         client.edit_message_text(
                             chat_id=message.chat.id,
