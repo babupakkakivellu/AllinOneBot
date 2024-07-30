@@ -54,18 +54,24 @@ async def settings_command(client, message: Message):
 @app.on_message(filters.command("set_format") & filters.private)
 async def set_format(client, message: Message):
     user_id = message.from_user.id
-    format = message.text.split(maxsplit=1)[1].strip()
-    user_settings[user_id] = user_settings.get(user_id, {"upload_format": "video", "caption_font": "default"})
-    user_settings[user_id]["upload_format"] = format
-    await message.reply(f"Upload format set to {format}.")
+    try:
+        format = message.text.split(maxsplit=1)[1].strip()
+        user_settings[user_id] = user_settings.get(user_id, {"upload_format": "video", "caption_font": "default"})
+        user_settings[user_id]["upload_format"] = format
+        await message.reply(f"Upload format set to {format}.")
+    except IndexError:
+        await message.reply("Please specify the format (e.g., video or document).")
 
 @app.on_message(filters.command("set_font") & filters.private)
 async def set_font(client, message: Message):
     user_id = message.from_user.id
-    font = message.text.split(maxsplit=1)[1].strip()
-    user_settings[user_id] = user_settings.get(user_id, {"upload_format": "video", "caption_font": "default"})
-    user_settings[user_id]["caption_font"] = font
-    await message.reply(f"Caption font set to {font}.")
+    try:
+        font = message.text.split(maxsplit=1)[1].strip()
+        user_settings[user_id] = user_settings.get(user_id, {"upload_format": "video", "caption_font": "default"})
+        user_settings[user_id]["caption_font"] = font
+        await message.reply(f"Caption font set to {font}.")
+    except IndexError:
+        await message.reply("Please specify the font.")
 
 @app.on_message(filters.video & filters.private)
 async def receive_videos(client, message: Message):
@@ -91,9 +97,17 @@ async def receive_videos(client, message: Message):
         await message.reply("File received. Send more files or type /done when finished.")
 
 @app.on_message(filters.text & filters.private)
-async def handle_filename(client, message: Message):
+async def handle_text_messages(client, message: Message):
     user_id = message.from_user.id
-    if user_id in pending_files and "operation" in pending_files[user_id]:
+
+    if message.text.strip().lower() == "/done" and user_id in pending_files:
+        if pending_files[user_id]["operation"] == "merge_videos":
+            if len(pending_files[user_id]["videos"]) > 1:
+                await message.reply("Please provide the output filename (e.g., merged_video.mp4):")
+            else:
+                await message.reply("You need to send at least two files to merge.")
+    
+    elif user_id in pending_files and "operation" in pending_files[user_id]:
         if pending_files[user_id]["operation"] == "merge_videos":
             filename = message.text.strip()
             if not filename or not filename.lower().endswith((".mp4", ".mkv")):
@@ -121,16 +135,6 @@ async def handle_filename(client, message: Message):
             os.remove(output_file)
             
             del pending_files[user_id]
-
-@app.on_message(filters.text & filters.private)
-async def handle_done(client, message: Message):
-    user_id = message.from_user.id
-    if message.text.strip().lower() == "/done" and user_id in pending_files:
-        if pending_files[user_id]["operation"] == "merge_videos":
-            if len(pending_files[user_id]["videos"]) > 1:
-                await message.reply("Please provide the output filename (e.g., merged_video.mp4):")
-            else:
-                await message.reply("You need to send at least two files to merge.")
 
 @app.on_callback_query()
 async def handle_callbacks(client, callback_query):
