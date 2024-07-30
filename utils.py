@@ -14,14 +14,26 @@ async def download_media_with_progress(client: Client, file_id: str, message: ty
     
     file_path = os.path.join(DOWNLOAD_DIR, f"{file_id}.mp4")
     
-    async with client.download_media(file_id, file_path) as progress:
-        total_size = progress.total
-        downloaded = 0
-        
-        async for chunk in progress:
-            downloaded += len(chunk)
-            progress_percentage = (downloaded / total_size) * 100
+    # Download file
+    download = await client.download_media(file_id, file_path)
+    
+    if download:
+        await message.edit_text("Downloading: 0% completed")  # Initial message
+    
+        # Track progress
+        file_size = os.path.getsize(file_path)
+        downloaded_size = 0
+
+        # Report progress
+        while downloaded_size < file_size:
+            downloaded_size = os.path.getsize(file_path)
+            progress_percentage = (downloaded_size / file_size) * 100
             await message.edit_text(f"Downloading: {progress_percentage:.2f}% completed")
+            await asyncio.sleep(4)  # Update progress every 4 seconds
+
+        await message.edit_text("Download completed")
+    else:
+        await message.edit_text("Download failed")
     
     return file_path
 
