@@ -1,9 +1,10 @@
 import os
 import asyncio
+import time
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from config import api_id, api_hash, bot_token
-from utils import merge_videos, get_video_metadata
+from utils import merge_videos, get_video_metadata, get_random_thumbnail
 
 # Initialize the bot
 app = Client("ffmpeg_bot", api_id=api_id, api_hash=api_hash, bot_token=bot_token)
@@ -15,7 +16,6 @@ pending_files = {}
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message: Message):
     user_id = message.from_user.id
-    # Initialize user settings if not present
     if user_id not in user_settings:
         user_settings[user_id] = {"upload_format": "video", "caption_font": "default", "thumbnail": None}
 
@@ -49,7 +49,6 @@ async def help_command(client, message: Message):
 @app.on_message(filters.command("settings") & filters.private)
 async def settings_command(client, message: Message):
     user_id = message.from_user.id
-    # Initialize user settings if not present
     if user_id not in user_settings:
         user_settings[user_id] = {"upload_format": "video", "caption_font": "default", "thumbnail": None}
 
@@ -66,7 +65,6 @@ async def settings_command(client, message: Message):
 @app.on_message(filters.command("set_format") & filters.private)
 async def set_format(client, message: Message):
     user_id = message.from_user.id
-    # Initialize user settings if not present
     if user_id not in user_settings:
         user_settings[user_id] = {"upload_format": "video", "caption_font": "default", "thumbnail": None}
     try:
@@ -79,7 +77,6 @@ async def set_format(client, message: Message):
 @app.on_message(filters.command("set_font") & filters.private)
 async def set_font(client, message: Message):
     user_id = message.from_user.id
-    # Initialize user settings if not present
     if user_id not in user_settings:
         user_settings[user_id] = {"upload_format": "video", "caption_font": "default", "thumbnail": None}
     try:
@@ -96,7 +93,6 @@ async def set_thumbnail_command(client, message: Message):
 @app.on_message(filters.photo & filters.private)
 async def receive_thumbnail(client, message: Message):
     user_id = message.from_user.id
-    # Initialize user settings if not present
     if user_id not in user_settings:
         user_settings[user_id] = {"upload_format": "video", "caption_font": "default", "thumbnail": None}
 
@@ -113,7 +109,9 @@ async def receive_videos(client, message: Message):
         pending_files[user_id] = {
             "operation": "merge_videos",
             "videos": [],
-            "expected_count": None
+            "expected_count": None,
+            "progress_message": None,
+            "upload_message": None
         }
     
     pending_files[user_id]["videos"].append(video_file)
@@ -157,12 +155,35 @@ async def handle_text_messages(client, message: Message):
             video_files = pending_files[user_id]["videos"]
             output_file = filename
             
-            await message.reply("Merging videos, please wait...")
+            # Notify user that processing has started
+            progress_msg = await message.reply("Merging videos, please wait...")
+            pending_files[user_id]["progress_message"] = progress_msg.message_id
 
+            # Function to handle progress updates
+            def update_progress():
+                total_files = len(video_files)
+                for i in range(total_files):
+                    progress = (i + 1) / total_files * 100
+                    asyncio.run_coroutine_threadsafe(
+                        client.edit_message_text(
+                            chat_id=message.chat.id,
+                            message_id=pending_files[user_id]["progress_message"],
+                            text=f"Merging videos: {progress:.2f}% complete"
+                        ),
+                        asyncio.get_event_loop()
+                    )
+                    time.sleep(4)  # Update every 4 seconds
+
+            # Merge videos
             loop = asyncio.get_running_loop()
-            thumbnail = user_settings[user_id].get("thumbnail")
-            if not thumbnail:
-                thumbnail = await loop.run_in_executor(None, merge_videos, video_files, output_file)
+            await loop.run_in_executor(None, merge_videos, video_files, output_file)
+            
+            # Update progress to 100%
+            await client.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=pending_files[user_id]["progress_message"],
+                text="Merging videos: 100% complete. Processing video..."
+            )
 
             # Get video metadata
             duration, width, height = await loop.run_in_executor(None, get_video_metadata, output_file)
@@ -170,31 +191,58 @@ async def handle_text_messages(client, message: Message):
             settings = user_settings[user_id]
             caption = "Videos merged successfully!"
 
+            # Notify user that upload has started
+            upload_msg = await message.reply("Uploading video, please wait...")
+            pending_files[user_id]["upload_message"] = upload_msg.message_id
+
+            # Function to handle upload progress updates
+            def update_upload_progress(file_size):
+                chunk_size = 1024 * 1024  # 1 MB
+                total_chunks = file_size // chunk_size + (file_size % chunk_size > 0)
+                for i in range(total_chunks):
+                    progress = (i + 1) / total_chunks * 100
+                    asyncio.run_coroutine_threadsafe(
+                        client.edit_message_text(
+                            chat_id=message.chat.id,
+                            message_id=pending_files[user_id]["upload_message"],
+                            text=f"Uploading video: {progress:.2f}% complete"
+                        ),
+                        asyncio.get_event_loop()
+                    )
+                    time.sleep(4)  # Update every 4 seconds
+
+            # Upload video with progress tracking
+            file_size = os.path.getsize(output_file)
+            update_upload_progress(file_size)
+            
+            # Upload video or document based on user setting
             if settings["upload_format"] == "video":
+                thumb = settings["thumbnail"] if settings["thumbnail"] else None
                 await client.send_video(
-                    message.chat.id,
+                    chat_id=message.chat.id,
                     video=output_file,
                     caption=caption,
-                    duration=duration if duration else None,
-                    width=width if width else None,
-                    height=height if height else None,
-                    thumb=thumbnail,
+                    duration=duration,
+                    width=width,
+                    height=height,
+                    thumb=thumb,
                     supports_streaming=True
                 )
             else:
                 await client.send_document(
-                    message.chat.id,
+                    chat_id=message.chat.id,
                     document=output_file,
                     caption=caption
                 )
 
+            # Clean up
             for file in video_files:
                 os.remove(file)
-            if thumbnail:
-                os.remove(thumbnail)
             os.remove(output_file)
             
             del pending_files[user_id]
+            if settings["thumbnail"]:
+                user_settings[user_id]["thumbnail"] = None
 
 @app.on_callback_query()
 async def handle_callbacks(client, callback_query):
