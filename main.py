@@ -175,9 +175,9 @@ async def handle_text_messages(client, message: Message):
                     message.chat.id,
                     video=output_file,
                     caption=caption,
-                    duration=duration,
-                    width=width,
-                    height=height,
+                    duration=duration if duration else None,
+                    width=width if width else None,
+                    height=height if height else None,
                     thumb=thumbnail,
                     supports_streaming=True
                 )
