@@ -6,19 +6,31 @@ from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from config import api_id, api_hash, bot_token
 from utils import merge_videos, get_video_metadata, get_random_thumbnail
 
-# Initialize the bot
 app = Client("ffmpeg_bot", api_id=api_id, api_hash=api_hash, bot_token=bot_token)
 
-# In-memory user settings and files storage
 user_settings = {}
 pending_files = {}
 
+# Function to show download progress
+async def download_media_with_progress(client, message, file_id, file_name, chat_id):
+    file_size = message.video.file_size
+    downloaded = 0
+    progress_message = await client.send_message(chat_id, "Starting download...")
+
+    async def progress_callback(current, total):
+        nonlocal downloaded
+        downloaded = current
+        percent = (current / total) * 100
+        await progress_message.edit(f"Downloading: {percent:.2f}%")
+
+    downloaded_file = await client.download_media(
+        file_id, file_name=file_name, progress=progress_callback
+    )
+    await progress_message.delete()  # Delete the progress message after download
+    return downloaded_file
+
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message: Message):
-    user_id = message.from_user.id
-    if user_id not in user_settings:
-        user_settings[user_id] = {"upload_format": "video", "caption_font": "default", "thumbnail": None}
-
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("Help", callback_data="help")],
         [InlineKeyboardButton("Merge Videos", callback_data="merge_videos")]
@@ -28,8 +40,7 @@ async def start(client, message: Message):
         "You can use the following commands:\n"
         "/merge - Merge multiple videos.\n"
         "Send videos one by one, and I will ask for the output filename once all are received.\n"
-        "Type /done when finished sending files.\n"
-        "Use /set_thumbnail to set a thumbnail image."
+        "Type /done when finished sending files."
     )
     await message.reply(welcome_text, reply_markup=keyboard)
 
@@ -41,7 +52,6 @@ async def help_command(client, message: Message):
         "/merge - Start merging videos.\n"
         "Send videos one by one and type /done when finished.\n"
         "Provide a filename for the merged video.\n"
-        "/set_thumbnail - Send an image to set it as the video thumbnail.\n"
         "You can also use inline buttons for quick actions."
     )
     await message.reply(help_text)
@@ -49,15 +59,11 @@ async def help_command(client, message: Message):
 @app.on_message(filters.command("settings") & filters.private)
 async def settings_command(client, message: Message):
     user_id = message.from_user.id
-    if user_id not in user_settings:
-        user_settings[user_id] = {"upload_format": "video", "caption_font": "default", "thumbnail": None}
-
-    settings = user_settings.get(user_id)
+    settings = user_settings.get(user_id, {"upload_format": "video", "caption_font": "default", "thumbnail": None})
     settings_text = (
         f"Current settings:\n"
         f"Upload format: {settings['upload_format']}\n"
-        f"Caption font: {settings['caption_font']}\n"
-        f"Thumbnail: {'Set' if settings['thumbnail'] else 'Not Set'}\n\n"
+        f"Caption font: {settings['caption_font']}\n\n"
         "To change settings, send /set_format <format> or /set_font <font>."
     )
     await message.reply(settings_text)
@@ -65,184 +71,90 @@ async def settings_command(client, message: Message):
 @app.on_message(filters.command("set_format") & filters.private)
 async def set_format(client, message: Message):
     user_id = message.from_user.id
-    if user_id not in user_settings:
-        user_settings[user_id] = {"upload_format": "video", "caption_font": "default", "thumbnail": None}
-    try:
-        format = message.text.split(maxsplit=1)[1].strip()
-        user_settings[user_id]["upload_format"] = format
-        await message.reply(f"Upload format set to {format}.")
-    except IndexError:
-        await message.reply("Please specify the format (e.g., video or document).")
+    format = message.text.split(maxsplit=1)[1].strip()
+    user_settings[user_id] = user_settings.get(user_id, {"upload_format": "video", "caption_font": "default", "thumbnail": None})
+    user_settings[user_id]["upload_format"] = format
+    await message.reply(f"Upload format set to {format}.")
 
 @app.on_message(filters.command("set_font") & filters.private)
 async def set_font(client, message: Message):
     user_id = message.from_user.id
-    if user_id not in user_settings:
-        user_settings[user_id] = {"upload_format": "video", "caption_font": "default", "thumbnail": None}
-    try:
-        font = message.text.split(maxsplit=1)[1].strip()
-        user_settings[user_id]["caption_font"] = font
-        await message.reply(f"Caption font set to {font}.")
-    except IndexError:
-        await message.reply("Please specify the font.")
+    font = message.text.split(maxsplit=1)[1].strip()
+    user_settings[user_id] = user_settings.get(user_id, {"upload_format": "video", "caption_font": "default", "thumbnail": None})
+    user_settings[user_id]["caption_font"] = font
+    await message.reply(f"Caption font set to {font}.")
 
 @app.on_message(filters.command("set_thumbnail") & filters.private)
-async def set_thumbnail_command(client, message: Message):
-    await message.reply("Please send the image you want to use as a thumbnail.")
-
-@app.on_message(filters.photo & filters.private)
-async def receive_thumbnail(client, message: Message):
+async def set_thumbnail(client, message: Message):
     user_id = message.from_user.id
-    if user_id not in user_settings:
-        user_settings[user_id] = {"upload_format": "video", "caption_font": "default", "thumbnail": None}
-
-    thumbnail_file = await client.download_media(message.photo.file_id)
-    user_settings[user_id]["thumbnail"] = thumbnail_file
-    await message.reply("Thumbnail set successfully.")
+    if message.reply_to_message and message.reply_to_message.photo:
+        thumbnail_file = await client.download_media(message.reply_to_message.photo.file_id)
+        user_settings[user_id]["thumbnail"] = thumbnail_file
+        await message.reply("Thumbnail set successfully.")
+    else:
+        await message.reply("Please reply to an image message with this command to set a thumbnail.")
 
 @app.on_message(filters.video & filters.private)
 async def receive_videos(client, message: Message):
     user_id = message.from_user.id
-    
-    # Start download and show progress
-    download_msg = await message.reply("Downloading video, please wait...")
-    video_file = await download_media_with_progress(client, message, download_msg)
 
     if user_id not in pending_files:
         pending_files[user_id] = {
             "operation": "merge_videos",
             "videos": [],
-            "expected_count": None,
-            "progress_message": None,
-            "upload_message": None
+            "expected_count": None
         }
-    
+
+    video_count = len(pending_files[user_id]["videos"]) + 1
+    file_name = f"video_{video_count}.mkv"
+    video_file = await download_media_with_progress(client, message, message.video.file_id, file_name, message.chat.id)
     pending_files[user_id]["videos"].append(video_file)
-    video_count = len(pending_files[user_id]["videos"])
 
-    if video_count == 1:
-        await message.reply(f"1 file received.")
-    else:
-        await message.reply(f"{video_count} files received.")
-
-    if pending_files[user_id]["expected_count"] is not None:
-        if video_count < pending_files[user_id]["expected_count"]:
-            remaining_files = pending_files[user_id]["expected_count"] - video_count
-            await message.reply(f"You need to send {remaining_files} more files.")
-        else:
-            await message.reply("All files received. Please provide the output filename (e.g., merged_video.mp4):")
-    else:
-        await message.reply("Send more files or type /done when finished.")
-
-async def download_media_with_progress(client, message, progress_message):
-    """Download media with progress updates."""
-    file_path = None
-    file_id = message.video.file_id
-    total_size = message.video.file_size
-    progress = 0
-    try:
-        file_path = await client.download_media(
-            file_id,
-            progress=progress_for_pyrogram,
-            progress_args=(progress_message, total_size)
-        )
-    except Exception as e:
-        await client.edit_message_text(
-            chat_id=progress_message.chat.id,
-            message_id=progress_message.id,
-            text=f"Failed to download video: {str(e)}"
-        )
-    return file_path
-
-async def progress_for_pyrogram(current, total, progress_message, total_size):
-    """Progress callback for downloads."""
-    progress = current / total_size * 100
-    try:
-        await progress_message.edit(f"Downloading video: {progress:.2f}% complete")
-    except Exception as e:
-        print(f"Error updating message: {str(e)}")
+    await message.reply(f"{video_count} file{'s' if video_count > 1 else ''} received. Send more files or type /done when finished.")
 
 @app.on_message(filters.text & filters.private)
 async def handle_text_messages(client, message: Message):
     user_id = message.from_user.id
-
-    if user_id not in user_settings:
-        user_settings[user_id] = {"upload_format": "video", "caption_font": "default", "thumbnail": None}
-
     if message.text.strip().lower() == "/done" and user_id in pending_files:
         if pending_files[user_id]["operation"] == "merge_videos":
             if len(pending_files[user_id]["videos"]) > 1:
-                await message.reply("Please provide the output filename (e.g., merged_video.mp4):")
+                await message.reply("Please provide the output filename (e.g., merged_video.mkv):")
             else:
                 await message.reply("You need to send at least two files to merge.")
-    
-    elif user_id in pending_files and "operation" in pending_files[user_id]:
+        return
+
+    if user_id in pending_files and "operation" in pending_files[user_id]:
         if pending_files[user_id]["operation"] == "merge_videos":
             filename = message.text.strip()
-            if not filename or not filename.lower().endswith((".mp4", ".mkv")):
-                await message.reply("Invalid filename. Please provide a filename ending with .mp4 or .mkv.")
+            if not filename or not filename.lower().endswith(".mkv"):
+                await message.reply("Invalid filename. Please provide a filename ending with .mkv.")
                 return
 
             video_files = pending_files[user_id]["videos"]
             output_file = filename
-            
-            # Notify user that processing has started
-            progress_msg = await message.reply("Merging videos, please wait...")
-            pending_files[user_id]["progress_message"] = progress_msg.id
 
-            # Function to handle progress updates
-            def update_progress():
-                total_files = len(video_files)
-                for i in range(total_files):
-                    progress = (i + 1) / total_files * 100
-                    asyncio.run_coroutine_threadsafe(
-                        client.edit_message_text(
-                            chat_id=message.chat.id,
-                            message_id=pending_files[user_id]["progress_message"],
-                            text=f"Merging videos: {progress:.2f}% complete"
-                        ),
-                        asyncio.get_event_loop()
-                    )
-                    time.sleep(4)  # Update every 4 seconds
+            await message.reply("Merging videos, please wait...")
 
-            # Merge videos with progress tracking
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, merge_videos, video_files, output_file)
-            update_progress()
 
-            # Get video metadata
-            duration, width, height = await loop.run_in_executor(None, get_video_metadata, output_file)
-            thumb = user_settings[user_id].get("thumbnail")
+            settings = user_settings.get(user_id, {"upload_format": "video", "caption_font": "default", "thumbnail": None})
+            caption = "Videos merged successfully!"
+
+            # Get metadata for video
+            duration, width, height = get_video_metadata(output_file)
+            thumb = settings.get("thumbnail")
             if not thumb:
                 thumb = get_random_thumbnail(output_file)
-
-            settings = user_settings.get(user_id)
-            caption = "Videos merged successfully!"
 
             # Upload progress message
             upload_msg = await message.reply("Uploading video, please wait...")
             pending_files[user_id]["upload_message"] = upload_msg.id
 
-            # Function to handle upload progress updates
-            def update_upload_progress(file_size):
-                uploaded = 0
-                while uploaded < file_size:
-                    uploaded += file_size * 0.1  # Simulate upload progress
-                    progress = uploaded / file_size * 100
-                    asyncio.run_coroutine_threadsafe(
-                        client.edit_message_text(
-                            chat_id=message.chat.id,
-                            message_id=pending_files[user_id]["upload_message"],
-                            text=f"Uploading video: {progress:.2f}% complete"
-                        ),
-                        asyncio.get_event_loop()
-                    )
-                    time.sleep(4)  # Update every 4 seconds
+            async def update_upload_progress(current, total):
+                percent = (current / total) * 100
+                await upload_msg.edit(f"Uploading: {percent:.2f}% complete")
 
-            # Upload video with progress tracking
-            file_size = os.path.getsize(output_file)
-            update_upload_progress(file_size)
-            
             # Upload video or document based on user setting
             if settings["upload_format"] == "video":
                 await client.send_video(
@@ -253,13 +165,15 @@ async def handle_text_messages(client, message: Message):
                     width=width,
                     height=height,
                     thumb=thumb,
-                    supports_streaming=True
+                    supports_streaming=True,
+                    progress=update_upload_progress
                 )
             else:
                 await client.send_document(
                     chat_id=message.chat.id,
                     document=output_file,
-                    caption=caption
+                    caption=caption,
+                    progress=update_upload_progress
                 )
 
             # Clean up
