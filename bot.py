@@ -1,31 +1,36 @@
 import os
 import asyncio
-import re
 import subprocess
-from pyrogram import Client, filters
-from concurrent.futures import ThreadPoolExecutor
 import tempfile
+from pyrogram import Client, filters
 from config import API_ID, API_HASH, BOT_TOKEN
 
 # Initialize the Pyrogram Client
 app = Client("merge_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# Dictionary to store user file lists and batch information
+# Dictionary to store user files
 user_files = {}
 
-# Use a thread pool for running blocking operations
-executor = ThreadPoolExecutor(max_workers=4)
+# Run FFmpeg commands in a separate thread to avoid blocking the event loop
+async def run_ffmpeg_command(command):
+    process = subprocess.Popen(
+        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
+    output, error = await asyncio.get_event_loop().run_in_executor(
+        None, process.communicate
+    )
+    return process.returncode, output.decode(), error.decode()
 
 @app.on_message(filters.command("start"))
 async def start(_, message):
-    await message.reply_text("Send me files, then reply to the first file in your batch with /merge -i N to combine N files.")
+    await message.reply_text("Send me files, then use /merge -i N where N is the number of files to merge.")
 
 @app.on_message(filters.command("help"))
 async def help(_, message):
-    await message.reply_text("Send files to me, then reply to the first file with /merge -i N to combine N files.")
+    await message.reply_text("Send files to me, then use /merge -i N to combine N files.")
 
 @app.on_message(filters.document)
-async def receive_files(client, message):
+async def receive_files(_, message):
     user_id = message.from_user.id
     if user_id not in user_files:
         user_files[user_id] = []
@@ -34,19 +39,14 @@ async def receive_files(client, message):
     file_path = await message.download()
     user_files[user_id].append(file_path)
 
-    # Send feedback message
-    await message.reply_text(f"File received! Total files: {len(user_files[user_id])}. Reply to the first file with /merge -i N to combine N files.")
+    # Notify the user
+    await message.reply_text(f"File received! Total files: {len(user_files[user_id])}. Use /merge -i N to combine the first N files.")
 
 @app.on_message(filters.command("merge"))
-async def merge_files_command(client, message):
+async def merge_files_command(_, message):
     user_id = message.from_user.id
 
-    # Check if the /merge command is replying to a message
-    if not message.reply_to_message or not message.reply_to_message.document:
-        await message.reply_text("You need to reply to the first file in your batch with /merge -i N.")
-        return
-
-    # Extract the number of files to merge
+    # Ensure the command format is correct
     command_parts = message.text.split()
     if len(command_parts) < 3 or command_parts[1] != "-i":
         await message.reply_text("Usage: /merge -i N where N is the number of files to merge.")
@@ -55,12 +55,12 @@ async def merge_files_command(client, message):
     try:
         num_files = int(command_parts[2])
         if user_id not in user_files or len(user_files[user_id]) < num_files:
-            await message.reply_text(f"You need to send at least {num_files} files to merge them.")
+            await message.reply_text(f"You need to upload at least {num_files} files before merging.")
             return
 
-        # Filter files to merge based on the number specified
+        # Select files to merge
         files_to_merge = user_files[user_id][:num_files]
-        
+
         # Create a temporary file list for FFmpeg
         with tempfile.NamedTemporaryFile(mode="w+", delete=False) as f:
             input_txt_path = f.name
@@ -75,41 +75,17 @@ async def merge_files_command(client, message):
             "-c", "copy", output_file
         ]
 
-        # Function to capture FFmpeg progress
-        def ffmpeg_progress_callback(process):
-            output = ""
-            while True:
-                line = process.stdout.readline().decode("utf-8")
-                if not line and process.poll() is not None:
-                    break
-                if line:
-                    output += line
-                    # Look for progress information in FFmpeg output
-                    match = re.search(r'(\d+(\.\d+)?)%.*?(\d+(\.\d+)?)kB/s', line)
-                    if match:
-                        percent = match.group(1)
-                        speed = match.group(3)
-                        asyncio.run_coroutine_threadsafe(
-                            update_progress_message(message, f"Merging progress: {percent}% at {speed} KB/s"),
-                            asyncio.get_event_loop()
-                        ).result()
+        # Run FFmpeg command
+        returncode, output, error = await run_ffmpeg_command(ffmpeg_command)
 
-        # Run FFmpeg as a subprocess and capture progress
-        process = subprocess.Popen(
-            ffmpeg_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
-        await asyncio.get_event_loop().run_in_executor(
-            executor, ffmpeg_progress_callback, process
-        )
-        process.wait()
-
-        # Send the merged file to the user
-        await message.reply_document(document=output_file)
+        if returncode != 0:
+            await message.reply_text(f"An error occurred during merging: {error}")
+        else:
+            # Send the merged file to the user
+            await message.reply_document(document=output_file)
 
     except (IndexError, ValueError):
         await message.reply_text("Invalid number of files specified. Usage: /merge -i N where N is the number of files to merge.")
-    except subprocess.CalledProcessError as e:
-        await message.reply_text(f"An error occurred during merging: {e}")
     finally:
         # Clean up
         for file in user_files[user_id]:
@@ -119,10 +95,6 @@ async def merge_files_command(client, message):
         if os.path.exists(output_file):
             os.remove(output_file)
         user_files[user_id] = []
-
-async def update_progress_message(message, text):
-    # Send a new message with the progress update
-    await message.reply_text(text)
 
 # Run the bot
 app.run()
