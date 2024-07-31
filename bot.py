@@ -12,17 +12,18 @@ app = Client("merge_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 # A dictionary to store user file lists
 user_files = {}
+user_merge_count = {}
 
 # Use a thread pool for running blocking operations
 executor = ThreadPoolExecutor(max_workers=4)
 
 @app.on_message(filters.command("start"))
 async def start(_, message):
-    await message.reply_text("Hi! Send me files to collect them. Use /merge to combine them.")
+    await message.reply_text("Hi! Send me files to collect them. Use /merge -i N to combine N files.")
 
 @app.on_message(filters.command("help"))
 async def help(_, message):
-    await message.reply_text("Send me files, and use /merge to combine them into one.")
+    await message.reply_text("Send me files, and use /merge -i N to combine N files into one.")
 
 @app.on_message(filters.document)
 async def receive_files(client, message):
@@ -35,22 +36,32 @@ async def receive_files(client, message):
     user_files[user_id].append(file_path)
 
     # Send feedback message
-    await message.reply_text(f"File received! Total files: {len(user_files[user_id])}. Use /merge to combine them.")
+    await message.reply_text(f"File received! Total files: {len(user_files[user_id])}. Use /merge -i N to combine them.")
 
 @app.on_message(filters.command("merge"))
 async def merge_files_command(client, message):
     user_id = message.from_user.id
-    if user_id not in user_files or len(user_files[user_id]) < 2:
-        await message.reply_text("You need to send at least 2 files to merge them.")
+
+    # Extract the number of files to merge
+    command_parts = message.text.split()
+    if len(command_parts) < 2 or command_parts[1] != "-i":
+        await message.reply_text("Usage: /merge -i N where N is the number of files to merge.")
         return
 
     try:
+        num_files = int(command_parts[2])
+        if user_id not in user_files or len(user_files[user_id]) < num_files:
+            await message.reply_text(f"You need to send at least {num_files} files to merge them.")
+            return
+
+        # Download the required number of files
+        files_to_merge = user_files[user_id][:num_files]
         output_files = []
-        for file_path in user_files[user_id]:
+
+        for file_path in files_to_merge:
             # Ensure each file is downloaded
             if not os.path.exists(file_path):
                 await client.download_media(file_path, file_path)
-
             output_files.append(file_path)
 
         # Create a temporary file list for FFmpeg
@@ -98,6 +109,8 @@ async def merge_files_command(client, message):
         # Send the merged file to the user
         await message.reply_document(document=output_file)
 
+    except (IndexError, ValueError):
+        await message.reply_text("Invalid number of files specified. Usage: /merge -i N where N is the number of files to merge.")
     except subprocess.CalledProcessError as e:
         await message.reply_text(f"An error occurred during merging: {e}")
     finally:
