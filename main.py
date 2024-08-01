@@ -13,6 +13,15 @@ app = Client(
     bot_token=config.BOT_TOKEN
 )
 
+def find_file(filename, search_path='/'):
+    """
+    Search for a file in the given directory and subdirectories.
+    """
+    for root, dirs, files in os.walk(search_path):
+        if filename in files:
+            return os.path.join(root, filename)
+    return None
+
 # Define a handler for executing shell commands
 @app.on_message(filters.command("exec") & filters.private)
 def shell_command(client, message):
@@ -30,15 +39,14 @@ def shell_command(client, message):
     else:
         message.reply_text("Please provide a command to execute.")
 
-# Define a handler for uploading files from the base directory
+# Define a handler for uploading files using the filename
 @app.on_message(filters.command("up") & filters.private)
 def upload_file(client, message):
     # Extract the filename from the message
     filename = message.text.split(" ", 1)[1] if len(message.command) > 1 else ""
     if filename:
-        # Construct the full file path
-        file_path = os.path.join(config.BASE_DIRECTORY, filename)
-        if os.path.isfile(file_path):
+        file_path = find_file(filename)
+        if file_path:
             try:
                 # Send the file back to the user
                 client.send_document(chat_id=message.chat.id, document=file_path)
