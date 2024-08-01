@@ -9,7 +9,7 @@ import config  # Import the config module
 app = Client("shell_bot", api_id=config.api_id, api_hash=config.api_hash, bot_token=config.bot_token)
 
 # Base directory where files and folders are located
-BASE_DIR = "/path/to/base_directory"  # Set this to the base directory for your files
+BASE_DIR = "/home/user/files"  # Set this to the base directory for your files
 
 # Helper function to check if a user is allowed
 def is_user_allowed(user_id):
@@ -133,3 +133,4 @@ def clean_item(client, message):
 
 # Start the bot
 app.run()
+    
