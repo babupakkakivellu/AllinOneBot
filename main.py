@@ -11,19 +11,6 @@ app = Client("shell_bot", api_id=config.api_id, api_hash=config.api_hash, bot_to
 
 # Base directory where files and folders are located
 BASE_DIR = "/path/to/base_directory"  # Set this to the base directory for your files
-# main.py
-
-from pyrogram import Client, filters
-import os
-import subprocess
-import zipfile
-import config  # Import the config module
-
-# Initialize the Pyrogram client using the configurations from config.py
-app = Client("shell_bot", api_id=config.api_id, api_hash=config.api_hash, bot_token=config.bot_token)
-
-# Base directory where files and folders are located
-BASE_DIR = "/path/to/base_directory"  # Set this to the base directory for your files
 
 # Helper function to check if a user is allowed
 def is_user_allowed(user_id):
