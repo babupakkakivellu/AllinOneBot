@@ -11,6 +11,19 @@ app = Client("shell_bot", api_id=config.api_id, api_hash=config.api_hash, bot_to
 
 # Base directory where files and folders are located
 BASE_DIR = "/path/to/base_directory"  # Set this to the base directory for your files
+# main.py
+
+from pyrogram import Client, filters
+import os
+import subprocess
+import zipfile
+import config  # Import the config module
+
+# Initialize the Pyrogram client using the configurations from config.py
+app = Client("shell_bot", api_id=config.api_id, api_hash=config.api_hash, bot_token=config.bot_token)
+
+# Base directory where files and folders are located
+BASE_DIR = "/path/to/base_directory"  # Set this to the base directory for your files
 
 # Helper function to check if a user is allowed
 def is_user_allowed(user_id):
@@ -39,6 +52,21 @@ def send_message_or_file(client, chat_id, text, file_name="output.txt"):
 # Function to send a file as a video
 def send_video(client, chat_id, file_path):
     client.send_video(chat_id, video=file_path)
+
+# Command to execute shell commands
+@app.on_message(filters.command("shell"))
+def shell_command(client, message):
+    if not is_user_allowed(message.from_user.id):
+        message.reply_text("You are not authorized to use this command.")
+        return
+
+    try:
+        command = message.text.split(maxsplit=1)[1]  # Get the command from the message
+        result = subprocess.run(command, shell=True, capture_output=True, text=True)
+        output = result.stdout if result.stdout else result.stderr
+        send_message_or_file(client, message.chat.id, f"Output:\n{output}")
+    except Exception as e:
+        message.reply_text(f"Error: {str(e)}")
 
 # Command to upload a file or directory as a video or zip file
 @app.on_message(filters.command("upload"))
