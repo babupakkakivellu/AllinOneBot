@@ -1,5 +1,3 @@
-# main.py
-
 from pyrogram import Client, filters
 import os
 import subprocess
@@ -23,6 +21,16 @@ def zip_directory(directory_path):
                 zipf.write(file_path, os.path.relpath(file_path, directory_path))
     return zip_file
 
+# Function to send a message or a file if the message is too long
+def send_message_or_file(client, chat_id, text, file_name="output.txt"):
+    if len(text) > 4096:  # Telegram's message limit
+        with open(file_name, "w") as f:
+            f.write(text)
+        client.send_document(chat_id, file_name)
+        os.remove(file_name)  # Clean up the file after sending
+    else:
+        client.send_message(chat_id, text)
+
 # Command to execute shell commands
 @app.on_message(filters.command("shell"))
 def shell_command(client, message):
@@ -34,7 +42,7 @@ def shell_command(client, message):
         command = message.text.split(maxsplit=1)[1]  # Get the command from the message
         result = subprocess.run(command, shell=True, capture_output=True, text=True)
         output = result.stdout if result.stdout else result.stderr
-        message.reply_text(f"Output:\n{output}")
+        send_message_or_file(client, message.chat.id, f"Output:\n{output}")
     except Exception as e:
         message.reply_text(f"Error: {str(e)}")
 
