@@ -2,7 +2,6 @@
 
 from pyrogram import Client, filters
 import os
-import subprocess
 import zipfile
 import config  # Import the config module
 
