@@ -1,3 +1,5 @@
+# main.py
+
 from pyrogram import Client, filters
 import os
 import subprocess
@@ -6,6 +8,9 @@ import config  # Import the config module
 
 # Initialize the Pyrogram client using the configurations from config.py
 app = Client("shell_bot", api_id=config.api_id, api_hash=config.api_hash, bot_token=config.bot_token)
+
+# Base directory where files and folders are located
+BASE_DIR = "/path/to/base_directory"  # Set this to the base directory for your files
 
 # Helper function to check if a user is allowed
 def is_user_allowed(user_id):
@@ -46,22 +51,27 @@ def shell_command(client, message):
     except Exception as e:
         message.reply_text(f"Error: {str(e)}")
 
-# Command to upload a directory as a zip file
+# Command to upload a file or directory as a zip file
 @app.on_message(filters.command("upload"))
-def upload_directory(client, message):
+def upload_item(client, message):
     if not is_user_allowed(message.from_user.id):
         message.reply_text("You are not authorized to use this command.")
         return
 
     try:
-        directory_path = message.text.split(maxsplit=1)[1]  # Get the directory path
-        if not os.path.isdir(directory_path):
-            message.reply_text("Invalid directory path.")
-            return
+        item_name = message.text.split(maxsplit=1)[1]  # Get the file or folder name
+        item_path = os.path.join(BASE_DIR, item_name)  # Create the full path
 
-        zip_file = zip_directory(directory_path)
-        message.reply_document(zip_file)
-        os.remove(zip_file)  # Clean up the zip file after sending
+        if os.path.isfile(item_path):
+            zip_file = zip_directory(item_path)
+            message.reply_document(zip_file)
+            os.remove(zip_file)  # Clean up the zip file after sending
+        elif os.path.isdir(item_path):
+            zip_file = zip_directory(item_path)
+            message.reply_document(zip_file)
+            os.remove(zip_file)  # Clean up the zip file after sending
+        else:
+            message.reply_text("Invalid file or directory name.")
     except Exception as e:
         message.reply_text(f"Error: {str(e)}")
 
@@ -77,7 +87,8 @@ def download_file(client, message):
             message.reply_text("Please reply to a document to download.")
             return
 
-        directory_path = message.text.split(maxsplit=1)[1]  # Get the target directory path
+        directory_name = message.text.split(maxsplit=1)[1]  # Get the target directory name
+        directory_path = os.path.join(BASE_DIR, directory_name)
         if not os.path.isdir(directory_path):
             os.makedirs(directory_path)
 
@@ -97,15 +108,17 @@ def clean_item(client, message):
         return
 
     try:
-        item_path = message.text.split(maxsplit=1)[1]  # Get the file or folder path
+        item_name = message.text.split(maxsplit=1)[1]  # Get the file or folder name
+        item_path = os.path.join(BASE_DIR, item_name)  # Create the full path
+
         if os.path.isfile(item_path):
             os.remove(item_path)
-            message.reply_text(f"File '{item_path}' deleted successfully.")
+            message.reply_text(f"File '{item_name}' deleted successfully.")
         elif os.path.isdir(item_path):
             os.rmdir(item_path)  # Use os.rmdir() to delete an empty directory
-            message.reply_text(f"Directory '{item_path}' deleted successfully.")
+            message.reply_text(f"Directory '{item_name}' deleted successfully.")
         else:
-            message.reply_text("Invalid file or directory path.")
+            message.reply_text("Invalid file or directory name.")
     except Exception as e:
         message.reply_text(f"Error: {str(e)}")
 
