@@ -1,247 +1,105 @@
-import os
-import tempfile
-import logging
-import subprocess
+# main.py
+
 from pyrogram import Client, filters
-from config import API_ID, API_HASH, BOT_TOKEN
-from utils import run_ffmpeg_command, send_progress_update, get_video_dimensions, DEFAULT_SETTINGS, user_files, user_file_names, user_thumbnails, user_settings, progress_messages
+import os
+import subprocess
+import zipfile
+import config  # Import the config module
 
-# Setup logging
-logging.basicConfig(
-    filename='bot_errors.log',
-    level=logging.DEBUG,  # Changed to DEBUG to capture more details
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Initialize the Pyrogram client using the configurations from config.py
+app = Client("shell_bot", api_id=config.api_id, api_hash=config.api_hash, bot_token=config.bot_token)
 
-app = Client("merge_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+# Helper function to check if a user is allowed
+def is_user_allowed(user_id):
+    return user_id in config.allowed_users
 
-@app.on_message(filters.command("start"))
-async def start(_, message):
-    try:
-        await message.reply_text(
-            "Send me files, and use /list to view your files. Use /merge N to combine the first N files. Use /thumbnail to set a thumbnail. Use /settings to configure output format, font style, and other preferences."
-        )
-    except Exception as e:
-        logger.error(f"Error in /start command: {e}", exc_info=True)
+# Helper function to zip a directory
+def zip_directory(directory_path):
+    zip_file = f"{directory_path}.zip"
+    with zipfile.ZipFile(zip_file, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for root, dirs, files in os.walk(directory_path):
+            for file in files:
+                file_path = os.path.join(root, file)
+                zipf.write(file_path, os.path.relpath(file_path, directory_path))
+    return zip_file
 
-@app.on_message(filters.command("help"))
-async def help(_, message):
-    try:
-        await message.reply_text(
-            "Send files to me, use /list to view your files, /merge N to combine the first N files, /thumbnail to set a thumbnail, and /settings to configure output format, font style, and other preferences."
-        )
-    except Exception as e:
-        logger.error(f"Error in /help command: {e}", exc_info=True)
-
-@app.on_message(filters.document)
-async def receive_files(_, message):
-    user_id = message.from_user.id
-    if user_id not in user_files:
-        user_files[user_id] = []
-        user_file_names[user_id] = []
-        user_settings[user_id] = DEFAULT_SETTINGS.copy()
-
-    try:
-        # Download the file asynchronously
-        file_path = await message.download()
-        file_name = message.document.file_name
-        user_files[user_id].append(file_path)
-        user_file_names[user_id].append(file_name)
-
-        # Notify the user
-        await message.reply_text(
-            f"File received: {file_name}! Total files: {len(user_files[user_id])}. Please send the desired output filename."
-        )
-    except Exception as e:
-        logger.error(f"Error receiving file from user {user_id}: {e}", exc_info=True)
-        await message.reply_text("An error occurred while processing your file.")
-
-@app.on_message(filters.text & ~filters.command(["start", "help", "settings", "merge"]))
-async def receive_filename(_, message):
-    user_id = message.from_user.id
-    if user_id not in user_files or not user_files[user_id]:
-        await message.reply_text("Please send some files first.")
+# Command to execute shell commands
+@app.on_message(filters.command("shell"))
+def shell_command(client, message):
+    if not is_user_allowed(message.from_user.id):
+        message.reply_text("You are not authorized to use this command.")
         return
 
     try:
-        user_settings[user_id]["output_filename"] = message.text.strip()
-        await message.reply_text(
-            f"Output filename set to {message.text.strip()}. Use /list to view your files and /merge N to combine the first N files."
-        )
+        command = message.text.split(maxsplit=1)[1]  # Get the command from the message
+        result = subprocess.run(command, shell=True, capture_output=True, text=True)
+        output = result.stdout if result.stdout else result.stderr
+        message.reply_text(f"Output:\n{output}")
     except Exception as e:
-        logger.error(f"Error setting output filename for user {user_id}: {e}", exc_info=True)
-        await message.reply_text("An error occurred while setting the output filename.")
+        message.reply_text(f"Error: {str(e)}")
 
-@app.on_message(filters.photo)
-async def receive_thumbnail(_, message):
-    user_id = message.from_user.id
-
-    try:
-        # Download the thumbnail asynchronously
-        thumb_path = await message.download()
-        user_thumbnails[user_id] = thumb_path
-
-        # Notify the user
-        await message.reply_text("Thumbnail received! It will be used for your next merged video.")
-    except Exception as e:
-        logger.error(f"Error receiving thumbnail from user {user_id}: {e}", exc_info=True)
-        await message.reply_text("An error occurred while processing your thumbnail.")
-
-@app.on_message(filters.command("list"))
-async def list_files(_, message):
-    user_id = message.from_user.id
-    if user_id not in user_files or not user_files[user_id]:
-        await message.reply_text("You haven't uploaded any files yet.")
+# Command to upload a directory as a zip file
+@app.on_message(filters.command("upload"))
+def upload_directory(client, message):
+    if not is_user_allowed(message.from_user.id):
+        message.reply_text("You are not authorized to use this command.")
         return
 
     try:
-        file_list = "\n".join(f"{i+1}: {file_name}" for i, file_name in enumerate(user_file_names[user_id]))
-        await message.reply_text(f"Your files:\n{file_list}")
-    except Exception as e:
-        logger.error(f"Error listing files for user {user_id}: {e}", exc_info=True)
-        await message.reply_text("An error occurred while listing your files.")
-
-@app.on_message(filters.command("merge"))
-async def merge_files_command(_, message):
-    user_id = message.from_user.id
-
-    command_parts = message.text.split()
-    if len(command_parts) != 2:
-        await message.reply_text("Usage: /merge N where N is the number of files to merge.")
-        return
-
-    try:
-        num_files = int(command_parts[1])
-        if user_id not in user_files or len(user_files[user_id]) < num_files:
-            await message.reply_text(f"You need to upload at least {num_files} files before merging.")
+        directory_path = message.text.split(maxsplit=1)[1]  # Get the directory path
+        if not os.path.isdir(directory_path):
+            message.reply_text("Invalid directory path.")
             return
 
-        files_to_merge = user_files[user_id][:num_files]
-        settings = user_settings.get(user_id, DEFAULT_SETTINGS)
-        output_format = settings["output_format"]
-        send_as = settings["send_as"]
-        output_filename = settings.get("output_filename", f"merged_{user_id}")
-
-        with tempfile.NamedTemporaryFile(mode="w+", delete=False) as f:
-            input_txt_path = f.name
-            for file_path in files_to_merge:
-                f.write(f"file '{os.path.abspath(file_path)}'\n")
-
-        output_file = f"{output_filename}.{output_format}"
-        ffmpeg_command = [
-            "ffmpeg",
-            "-y",
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            input_txt_path,
-            "-c",
-            "copy",
-            output_file,
-        ]
-
-        async def handle_progress(output):
-            if "frame=" in output and "time=" in output:
-                await send_progress_update(message, output)
-
-        returncode = await run_ffmpeg_command(ffmpeg_command, handle_progress)
-
-        if returncode != 0:
-            await message.reply_text("An error occurred during merging.")
-        else:
-            # Get video dimensions
-            dimensions = get_video_dimensions(output_file)
-            width, height = dimensions if dimensions else ("unknown", "unknown")
-
-            font_style = settings["font_style"]
-            if font_style == "bold":
-                caption = f"*{output_filename}* ({width}x{height})"
-            elif font_style == "italic":
-                caption = f"_{output_filename}_ ({width}x{height})"
-            elif font_style == "code":
-                caption = f"`{output_filename}` ({width}x{height})"
-            elif font_style == "mono":
-                caption = f"```{output_filename}``` ({width}x{height})"
-            else:
-                caption = f"{output_filename} ({width}x{height})"
-
-            thumbnail = user_thumbnails.get(user_id)
-
-            if send_as == "video":
-                await message.reply_video(video=output_file, caption=caption, thumb=thumbnail)
-            elif send_as == "document":
-                await message.reply_document(document=output_file, caption=caption, thumb=thumbnail)
-
-    except ValueError:
-        await message.reply_text("Invalid number of files specified. Usage: /merge N where N is the number of files to merge.")
+        zip_file = zip_directory(directory_path)
+        message.reply_document(zip_file)
+        os.remove(zip_file)  # Clean up the zip file after sending
     except Exception as e:
-        logger.error(f"Error during merging for user {user_id}: {e}", exc_info=True)
-        await message.reply_text("An error occurred during the merging process.")
-    finally:
-        if os.path.exists(input_txt_path):
-            os.remove(input_txt_path)
-        for file in files_to_merge:
-            if os.path.exists(file):
-                os.remove(file)
-        if user_id in progress_messages:
-            await app.delete_messages(message.chat.id, progress_messages[user_id].message_id)
-            del progress_messages[user_id]
-        if user_id in user_thumbnails:
-            os.remove(user_thumbnails[user_id])
-            del user_thumbnails[user_id]
-        if user_id in user_file_names:
-            del user_file_names[user_id]
+        message.reply_text(f"Error: {str(e)}")
 
-@app.on_message(filters.command("settings"))
-async def settings(_, message):
-    user_id = message.from_user.id
-    command_parts = message.text.split()
-
-    if len(command_parts) < 2:
-        await message.reply_text(
-            "Usage: /settings option value\nAvailable options: output_format, font_style, send_as"
-        )
+# Command to download a file to a directory
+@app.on_message(filters.command("download") & filters.reply)
+def download_file(client, message):
+    if not is_user_allowed(message.from_user.id):
+        message.reply_text("You are not authorized to use this command.")
         return
 
-    option = command_parts[1].lower()
-    value = command_parts[2].lower() if len(command_parts) > 2 else None
+    try:
+        if not message.reply_to_message.document:
+            message.reply_text("Please reply to a document to download.")
+            return
+
+        directory_path = message.text.split(maxsplit=1)[1]  # Get the target directory path
+        if not os.path.isdir(directory_path):
+            os.makedirs(directory_path)
+
+        file_id = message.reply_to_message.document.file_id
+        file_name = message.reply_to_message.document.file_name
+        download_path = os.path.join(directory_path, file_name)
+        client.download_media(file_id, file_name=download_path)
+        message.reply_text(f"Downloaded to {download_path}")
+    except Exception as e:
+        message.reply_text(f"Error: {str(e)}")
+
+# Command to clean (delete) a file or folder
+@app.on_message(filters.command("clean"))
+def clean_item(client, message):
+    if not is_user_allowed(message.from_user.id):
+        message.reply_text("You are not authorized to use this command.")
+        return
 
     try:
-        if option == "output_format":
-            if value in ["mkv", "mp4"]:
-                user_settings.setdefault(user_id, DEFAULT_SETTINGS.copy())[
-                    "output_format"
-                ] = value
-                await message.reply_text(f"Output format set to {value}.")
-            else:
-                await message.reply_text("Invalid format. Available formats: mkv, mp4.")
-        elif option == "font_style":
-            if value in ["normal", "bold", "italic", "code", "mono"]:
-                user_settings.setdefault(user_id, DEFAULT_SETTINGS.copy())[
-                    "font_style"
-                ] = value
-                await message.reply_text(f"Font style set to {value}.")
-            else:
-                await message.reply_text(
-                    "Invalid font style. Available styles: normal, bold, italic, code, mono."
-                )
-        elif option == "send_as":
-            if value in ["video", "document"]:
-                user_settings.setdefault(user_id, DEFAULT_SETTINGS.copy())[
-                    "send_as"
-                ] = value
-                await message.reply_text(f"Send as set to {value}.")
-            else:
-                await message.reply_text("Invalid option. Available options: video, document.")
+        item_path = message.text.split(maxsplit=1)[1]  # Get the file or folder path
+        if os.path.isfile(item_path):
+            os.remove(item_path)
+            message.reply_text(f"File '{item_path}' deleted successfully.")
+        elif os.path.isdir(item_path):
+            os.rmdir(item_path)  # Use os.rmdir() to delete an empty directory
+            message.reply_text(f"Directory '{item_path}' deleted successfully.")
         else:
-            await message.reply_text(
-                "Invalid option. Available options: output_format, font_style, send_as."
-            )
+            message.reply_text("Invalid file or directory path.")
     except Exception as e:
-        logger.error(f"Error in /settings command for user {user_id}: {e}", exc_info=True)
-        await message.reply_text("An error occurred while updating settings.")
+        message.reply_text(f"Error: {str(e)}")
 
+# Start the bot
 app.run()
