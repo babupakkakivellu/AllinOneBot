@@ -36,22 +36,11 @@ def send_message_or_file(client, chat_id, text, file_name="output.txt"):
     else:
         client.send_message(chat_id, text)
 
-# Command to execute shell commands
-@app.on_message(filters.command("shell"))
-def shell_command(client, message):
-    if not is_user_allowed(message.from_user.id):
-        message.reply_text("You are not authorized to use this command.")
-        return
+# Function to send a file as a video
+def send_video(client, chat_id, file_path):
+    client.send_video(chat_id, video=file_path)
 
-    try:
-        command = message.text.split(maxsplit=1)[1]  # Get the command from the message
-        result = subprocess.run(command, shell=True, capture_output=True, text=True)
-        output = result.stdout if result.stdout else result.stderr
-        send_message_or_file(client, message.chat.id, f"Output:\n{output}")
-    except Exception as e:
-        message.reply_text(f"Error: {str(e)}")
-
-# Command to upload a file or directory as a zip file
+# Command to upload a file or directory as a video or zip file
 @app.on_message(filters.command("upload"))
 def upload_item(client, message):
     if not is_user_allowed(message.from_user.id):
@@ -63,10 +52,16 @@ def upload_item(client, message):
         item_path = os.path.join(BASE_DIR, item_name)  # Create the full path
 
         if os.path.isfile(item_path):
-            zip_file = zip_directory(item_path)
-            message.reply_document(zip_file)
-            os.remove(zip_file)  # Clean up the zip file after sending
+            if item_path.lower().endswith(('.mkv', '.mp4')):
+                # Send the file as a video
+                send_video(client, message.chat.id, item_path)
+            else:
+                # If it's not a video, zip it before sending
+                zip_file = zip_directory(item_path)
+                message.reply_document(zip_file)
+                os.remove(zip_file)  # Clean up the zip file after sending
         elif os.path.isdir(item_path):
+            # Zip the directory and send as a document
             zip_file = zip_directory(item_path)
             message.reply_document(zip_file)
             os.remove(zip_file)  # Clean up the zip file after sending
