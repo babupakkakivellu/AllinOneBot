@@ -56,6 +56,13 @@ def get_video_metadata(file_path):
     except Exception as e:
         raise RuntimeError(f"Failed to get video metadata or generate thumbnail: {e}")
 
+def run_shell_command(command):
+    """
+    Run a shell command and return its output as a string.
+    """
+    result = subprocess.run(command, shell=True, capture_output=True, text=True)
+    return result.stdout if result.stdout else result.stderr
+
 # Define a handler for executing shell commands
 @app.on_message(filters.command("exec") & filters.private)
 def shell_command(client, message):
@@ -63,11 +70,19 @@ def shell_command(client, message):
     command = message.text.split(" ", 1)[1] if len(message.command) > 1 else ""
     if command:
         try:
-            # Execute the shell command
-            result = subprocess.run(command, shell=True, capture_output=True, text=True)
-            # Send the result back to the user
-            response = result.stdout if result.stdout else "No output"
-            message.reply_text(response)
+            # Run the shell command and get the output
+            output = run_shell_command(command)
+
+            # Save output to a text file
+            output_file = "output.txt"
+            with open(output_file, "w") as f:
+                f.write(output)
+
+            # Send the output file to the user
+            client.send_document(chat_id=message.chat.id, document=output_file, caption="Shell command output")
+
+            # Remove the output file after sending
+            os.remove(output_file)
         except Exception as e:
             message.reply_text(f"Error: {str(e)}")
     else:
@@ -117,3 +132,4 @@ def upload_file(client, message):
 # Run the bot
 if __name__ == "__main__":
     app.run()
+        
