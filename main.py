@@ -48,8 +48,13 @@ def upload_file(client, message):
         file_path = find_file(filename)
         if file_path:
             try:
-                # Send the file back to the user
-                client.send_document(chat_id=message.chat.id, document=file_path)
+                # Check file extension and upload accordingly
+                if file_path.lower().endswith('.mkv'):
+                    # Upload as a video
+                    client.send_video(chat_id=message.chat.id, video=file_path)
+                else:
+                    # Upload as a document
+                    client.send_document(chat_id=message.chat.id, document=file_path)
             except Exception as e:
                 message.reply_text(f"Error: {str(e)}")
         else:
